@@ -17,6 +17,7 @@ from camtool.workbench import (TRACK_TEMPLATE, demo_project, index_at_time, pert
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--smoke-dir", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--smoke-project",type=Path,help=argparse.SUPPRESS)
     args = parser.parse_args()
     prepare_display()
     root = tk.Tk()
@@ -91,14 +92,99 @@ def main() -> None:
                 app.navigation.select(0); root.update()
                 assert app.views.index(app.views.select())==0
                 snapshot=app.route_snapshot()
-                app.tree.selection_set("1","3"); app.select_row(None); app.delete_point()
+                app.tree.selection_set("1","3"); app.waypoints.refresh_selection(); app.waypoints.delete()
                 assert app.route_snapshot()["points"]==[p for i,p in enumerate(snapshot["points"]) if i not in (1,3)]
                 assert app.result is None and str(app.export_button["state"])=="disabled"
                 app.undo_route(); assert app.route_snapshot()==snapshot
-                app.select_all_points(); app.delete_point(); assert not app.tree.get_children()
+                app.waypoints.select_all(); app.waypoints.delete(); assert not app.tree.get_children()
+                app.undo_route(); assert app.route_snapshot()==snapshot
+                editor=app.waypoints
+                editor.begin_edit(1,0); editor.draft_text.set(str(snapshot["points"][1][0]+2))
+                assert editor.commit() and app.route_snapshot()["points"][1][0]==snapshot["points"][1][0]+2
+                app.undo_route(); assert app.route_snapshot()==snapshot
+                revision=app.revision
+                editor.begin_edit(1,1); editor.draft_text.set("NaN")
+                assert not editor.commit() and app.route_snapshot()==snapshot and app.revision==revision
+                editor.cancel_edit()
+                editor.new_x.set("4700"); editor.new_y.set("800"); editor.add()
+                assert app.route_snapshot()["points"]==snapshot["points"]+[[4700.,800.]]
                 app.undo_route(); assert app.route_snapshot()==snapshot
                 app.show_result(original)
-                directory.joinpath("smoke.json").write_text(json.dumps({"ok": True, "valid": app.result.valid,
+                from camtool.editor_smoke import check_point_editors
+                editor_checks=check_point_editors(app,directory/"双列表编辑验证")
+                from camtool.view_smoke import check_views
+                view_checks=check_views(app,directory/"视图与拖动验证")
+                # Exercise the actual auxiliary widgets + background search in
+                # the frozen EXE, including final exported-DXF independence.
+                import time
+                aux=app.auxiliary
+                aux.settings["evaluations"].set("4")
+                aux.settings["seconds"].set("10")
+                aux.start()
+                deadline=time.monotonic()+90
+                while aux.busy:
+                    root.update(); time.sleep(.01)
+                    if time.monotonic()>deadline: raise AssertionError("辅助搜索超时")
+                assert aux.outcome is not None,aux.summary.get()
+                assert aux.outcome.verification is not None
+                assert aux.outcome.verification.kinematic_pass,aux.outcome.status
+                assert len(aux.outcome.verification.path)>10
+                assert aux.outcome.candidate.project.route.waypoints==original.project.route.waypoints
+                aux.outcome.export(directory/"辅助搜索与最终DXF检验")
+                searched=aux.outcome
+                assert app.collect().to_dict()==searched.original_project.to_dict()
+                app.waypoints.begin_edit(1,0);app.waypoints.draft_text.set("尚未提交")
+                page.adopt(True)
+                assert app.waypoints.draft_text.get()=="尚未提交" and app.collect().to_dict()==searched.original_project.to_dict()
+                app.waypoints.cancel_edit()
+                page.adopt(True)
+                assert app.collect().to_dict()==searched.candidate.project.to_dict()
+                assert aux.editor.document.controls()==searched.candidate.project.route.auxiliary_points
+                page.adopt(False)
+                assert app.collect().to_dict()==searched.original_project.to_dict()
+                user_summary=None;user_editor_compatibility=None;user_search_editor=None
+                if args.smoke_project is not None:
+                    from camtool.project_validation import validate_project_file
+                    checked=validate_project_file(args.smoke_project,directory/"初试项目验证")
+                    app.load(checked.result.project);app.show_result(checked.result)
+                    app.views.select(4);app.report_tabs.select(1);root.update_idletasks()
+                    assert len(app.checkpoint_tree.get_children())==len(checked.result.project.route.waypoints)
+                    assert checked.summary["nominal_pass"],checked.summary
+                    assert checked.summary["parameters_unchanged"]
+                    aux.settings["evaluations"].set("12");aux.settings["seconds"].set("60")
+                    aux.start();deadline=time.monotonic()+120
+                    while aux.busy:
+                        root.update();time.sleep(.01)
+                        if time.monotonic()>deadline:raise AssertionError("初试候选编辑验证超时")
+                    user_outcome=aux.outcome
+                    assert user_outcome is not None,aux.summary.get()
+                    assert user_outcome.candidate.project.route.auxiliary_points,"未产生含辅助点的真实候选"
+                    assert app.collect().to_dict()==checked.result.project.to_dict()
+                    user_outcome.export(directory/"初试项目验证"/"有限辅助搜索_仅验证采用与恢复")
+                    page.adopt(True)
+                    assert aux.editor.document.controls()==user_outcome.candidate.project.route.auxiliary_points
+                    assert app.collect().route.waypoints==checked.result.project.route.waypoints
+                    page.adopt(False)
+                    assert app.collect().to_dict()==checked.result.project.to_dict()
+                    user_search_editor={"explicit_adopt_restore":True,"automatic_current_input_replacement":False,
+                        "controls":user_outcome.candidate.project.route.auxiliary_points,
+                        "status":user_outcome.status,"candidate_main_pass":user_outcome.candidate.valid,
+                        "candidate_independent_pass":None if user_outcome.verification is None else user_outcome.verification.kinematic_pass}
+                    old_required=app.route_snapshot()
+                    aux.editor.new_x.set("900");aux.editor.new_y.set("1000");aux.editor.new_segment.set("2")
+                    aux.editor.add_button.invoke();root.update()
+                    assert app.route_snapshot()==old_required
+                    app.file=directory/"初试项目验证"/"初试_辅助编辑兼容副本.cam.json"
+                    assert app.save()
+                    reopened_user=Project.load(app.file)
+                    assert reopened_user.route.auxiliary_points==[[1.,900.,1000.]]
+                    assert reopened_user.route.waypoints==checked.result.project.route.waypoints
+                    app.load(reopened_user)
+                    assert aux.editor.document.controls()==reopened_user.route.auxiliary_points
+                    app.load(checked.result.project);app.show_result(checked.result)
+                    user_editor_compatibility=True
+                    user_summary=checked.summary
+                directory.joinpath("smoke.json").write_text(json.dumps({"ok": True, "valid": original.valid,
                     "project_roundtrip": True, "dxf_audit": True, "frozen": getattr(sys, "frozen", False),
                     "executable": sys.executable, "software_version": VERSION, "independent_verification": independent.kinematic_pass,
                     "independent_path_points": len(independent.path), "verification_report_export": True,
@@ -106,7 +192,14 @@ def main() -> None:
                     "synthetic_csv_distinguished": page.track.metadata['kind']=='synthetic',
                     "fixed_dxf_prediction": True,"analysis_export": analysis.is_file(),
                     "bulk_waypoint_delete_undo": True,"single_navigation": True,
-                    "stats": app.result.stats}, ensure_ascii=False), encoding="utf-8")
+                    "inline_waypoint_edit": True,"isolated_waypoint_add": True,"waypoint_validation": True,
+                    "auxiliary_background_search": True,"auxiliary_final_dxf_verification": True,
+                    "auxiliary_candidate_explicit_adoption": True,
+                    "dual_point_editor": editor_checks,
+                    "figure_views": view_checks,
+                    "user_auxiliary_editor_compatibility": user_editor_compatibility,
+                    "user_search_candidate_editor": user_search_editor,
+                    "user_project_regression": user_summary, "stats": original.stats}, ensure_ascii=False), encoding="utf-8")
             except Exception as exc:
                 import traceback
                 smoke_failed.append(str(exc))

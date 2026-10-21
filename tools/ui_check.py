@@ -34,8 +34,9 @@ assert str(app.export_button["state"]) == "disabled"
 assert app.collect().vehicle.wheelbase == 140
 app.load(Project.demo())
 app.tree.selection_set("1")
-app.select_row(None)
-assert float(app.point_x.get()) == 1100
+app.waypoints.refresh_selection()
+app.views.select(0); root.update(); app.render()
+assert app.canvases["scene"].find_withtag("selected_waypoint_2")
 precise = Project.demo()
 precise.vehicle.wheelbase = 120.123456789
 precise.route.waypoints[1][0] = 1100.123456789

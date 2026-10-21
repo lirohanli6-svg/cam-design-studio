@@ -8,6 +8,8 @@ import numpy as np
 
 from .engine import Array, Result, follower_positions
 from .markings import cam_markings
+from .project import Project
+from .viewport import grid_step
 
 BLUE = "#2464df"
 TEAL = "#159c8c"
@@ -18,8 +20,16 @@ MUTED = "#718096"
 class Plot:
     def __init__(self, canvas: tk.Canvas, bounds: Iterable[float], *, equal: bool = True, footer: int = 0) -> None:
         self.canvas = canvas
-        canvas.delete("all")
+        self.footer = footer
+        if not getattr(canvas,'retained_frame',False):canvas.delete("all")
         xmin, xmax, ymin, ymax = bounds
+        state=getattr(canvas,'view_state',None)
+        if state is not None:
+            state.prepare((xmin,xmax,ymin,ymax),canvas.winfo_width(),canvas.winfo_height()-getattr(canvas,'view_footer',0))
+            self.xmin,self.xmax,self.ymin,self.ymax=state.visible()
+            self.sx=self.sy=state.scale;self.x0=self.y0=0.
+            self._camera_grid()
+            return
         if xmax-xmin < 1e-6:
             xmin, xmax = xmin-1, xmax+1
         if ymax-ymin < 1e-6:
@@ -42,6 +52,20 @@ class Plot:
             canvas.create_line(*a, *b, fill="#e7edf5")
             canvas.create_text(a[0]-8, a[1], text=f"{y:.1f}", anchor="e", fill=MUTED, font=("Segoe UI", 8))
 
+    def _camera_grid(self) -> None:
+        c=self.canvas;step=grid_step(self.sx);width=c.winfo_width();height=c.winfo_height()-getattr(c,'view_footer',0)
+        for x in np.arange(math.ceil(self.xmin/step)*step,self.xmax+step*.01,step)[:200]:
+            px,_=self.xy(float(x),0)
+            c.create_line(px,0,px,height,fill='#c2cfde' if abs(x)<step*.001 else '#e7edf5',tags='view_grid')
+            c.create_text(px,height-18,text=f'{x:g}',fill=MUTED,font=('Segoe UI',8),tags='view_axis')
+        for y in np.arange(math.ceil(self.ymin/step)*step,self.ymax+step*.01,step)[:200]:
+            _,py=self.xy(0,float(y))
+            c.create_line(0,py,width,py,fill='#c2cfde' if abs(y)<step*.001 else '#e7edf5',tags='view_grid')
+            c.create_text(6,py,text=f'{y:g}',anchor='w',fill=MUTED,font=('Segoe UI',8),tags='view_axis')
+        length=step*self.sx;right=max(140,width-25);bottom=max(65,height-82)
+        c.create_line(right-length,bottom,right,bottom,fill=INK,width=2,tags='scale_bar')
+        c.create_text(right-length/2,bottom-10,text=f'{step:g} mm',fill=INK,font=('Segoe UI',8),tags='scale_bar')
+
     def xy(self, x: float, y: float) -> tuple[float, float]:
         return self.x0+(x-self.xmin)*self.sx, self.y0+(self.ymax-y)*self.sy
 
@@ -51,7 +75,7 @@ class Plot:
     def line(self, points: Array, color: str = BLUE, width: float = 2, dash: tuple[int, int] | None = None) -> None:
         if len(points) < 2:
             return
-        stride = max(1, len(points)//2500)
+        stride = 1 if hasattr(self.canvas,'view_state') else max(1, len(points)//2500)
         points = np.vstack([points[::stride], points[-1]])
         coords = [coord for x, y in points for coord in self.xy(float(x), float(y))]
         self.canvas.create_line(*coords, fill=color, width=width, dash=dash or ())
@@ -65,21 +89,30 @@ class Plot:
         self.canvas.create_text(px+6, py-8, text=text, fill=color, anchor="sw", font=("Microsoft YaHei UI", 9))
 
 
-def scene(canvas: tk.Canvas, result: Result, index: int) -> Plot:
+def scene(canvas: tk.Canvas, result: Result, index: int, *, selected: Iterable[int] = (),
+          auxiliary_selected: Iterable[int] = ()) -> Plot:
     p, v = result.project, result.project.vehicle
     xmin, xmax, ymin, ymax = p.route.field
     extent = np.vstack([result.path, result.rear, [xmin, ymin], [xmax, ymax]])
     lo, hi = extent.min(axis=0)-100, extent.max(axis=0)+100
-    plot = Plot(canvas, [lo[0], hi[0], lo[1], hi[1]])
+    plot = Plot(canvas, [lo[0], hi[0], lo[1], hi[1]], footer=36)
     plot.line(np.array([[xmin, ymin], [xmax, ymin], [xmax, ymax], [xmin, ymax], [xmin, ymin]]), "#afbed1", 1.5)
     for x, y, radius in p.route.obstacles:
         plot.circle(x, y, radius, "#df9546", "#fff0dc")
     plot.line(result.target_path, TEAL, 1, (4, 3))
     plot.line(result.path)
+    auxiliary_marks(plot, p,auxiliary_selected)
     for number, (x, y) in enumerate(p.route.waypoints, 1):
-        plot.circle(x, y, p.route.tolerance, "#b6c8e5")
-        plot.circle(x, y, max(4, 4/plot.sx), BLUE, "#ffffff")
-        plot.label(x, y, str(number))
+        row=result.checkpoint_rows[number-1] if number<=len(result.checkpoint_rows) else None
+        missed=bool(len(result.profile) and row and not row["passed"])
+        color="#bc2842" if missed else BLUE
+        plot.circle(x,y,p.route.tolerance,color if missed else "#b6c8e5")
+        plot.circle(x,y,max(4,4/plot.sx),color,"#fff0f1" if missed else "#ffffff")
+        plot.label(x,y,str(number),color)
+        if missed and row is not None:
+            actual=np.asarray(row["point"])
+            plot.line(np.array([[x,y],actual]),"#bc2842",1,(3,3))
+            plot.label(float(actual[0]),float(actual[1]),f"漏{number} {row['error_mm']:.1f}mm","#bc2842")
     index = min(index, len(result.path)-1)
     rear, angle = result.rear[index], result.heading[index]
     tangent, normal = np.array([math.cos(angle), math.sin(angle)]), np.array([-math.sin(angle), math.cos(angle)])
@@ -94,8 +127,16 @@ def scene(canvas: tk.Canvas, result: Result, index: int) -> Plot:
     plot.label(float(drive[0]), float(drive[1]), "驱动", "#d58c30")
     sensor = result.path[index]
     plot.circle(float(sensor[0]), float(sensor[1]), 6/plot.sx, TEAL, TEAL)
-    canvas.create_text(14, 12, text="X / Y：mm   蓝：名义回算轨迹   虚线：目标轨迹   绿点：传感器", anchor="nw", fill=MUTED,
+    highlight_waypoints(plot,p.route.waypoints,selected)
+    canvas.create_text(14, 12, text="X/Y：mm  蓝：凸轮名义回算（非实测）  绿虚线：设计必过路线  红：漏点  绿点：传感器", anchor="nw", fill=MUTED,
                        width=max(150,canvas.winfo_width()-28))
+    passed=sum(bool(row['passed']) for row in result.checkpoint_rows)
+    fails=sum(c.status=='fail' for c in result.checks)
+    visits=f"名义打卡 {passed}/{len(result.checkpoint_rows)}" if len(result.profile) else "无凸轮，名义打卡未验证"
+    overall=f"整体 {fails} 项不满足" if fails else "仍需核对采样稳定性及最终DXF"
+    canvas.create_text(14,canvas.winfo_height()-6,anchor="sw",width=max(160,canvas.winfo_width()-28),
+                       text=f"{visits} · {overall} · 实际 {int(result.stats.get('cam_points_used',0))} 点",
+                       fill="#b3263d" if fails else "#875c18",tags="checkpoint_banner")
     return plot
 
 
@@ -206,20 +247,47 @@ def mechanism(canvas: tk.Canvas, result: Result, index: int, *, compact: bool = 
     return plot
 
 
-def route_edit(canvas: tk.Canvas, project: object, selected: int | None = None,
-               bounds: tuple[float,float,float,float] | None = None) -> Plot:
+def highlight_waypoints(plot: Plot, points: list[list[float]], selected: Iterable[int]) -> None:
+    groups: dict[tuple[float,float],list[int]]={}
+    for i in selected:
+        if not 0<=i<len(points): continue
+        groups.setdefault((points[i][0],points[i][1]),[]).append(i+1)
+    for point,numbers in groups.items():
+        x,y=plot.xy(*point); tags=("selected_waypoint",*(f"selected_waypoint_{n}" for n in numbers))
+        plot.canvas.create_oval(x-8,y-8,x+8,y+8,outline="#cf334a",width=3,tags=tags)
+        plot.canvas.create_text(x+12,y-13,anchor="sw",text="选中 "+"/".join(str(n) for n in numbers),fill="#cf334a",font=("Microsoft YaHei UI",10,"bold"),tags=tags)
+
+
+def route_edit(canvas: tk.Canvas, project: object, selected: Iterable[int] = (),
+               bounds: tuple[float,float,float,float] | None = None, *,
+               auxiliary_selected: Iterable[int] = (),mode: str="打卡点",footer: int=0) -> Plot:
     from .project import Project
     assert isinstance(project,Project)
     r=project.route
-    plot=Plot(canvas,bounds or (r.field[0]-80,r.field[1]+80,r.field[2]-80,r.field[3]+80))
+    plot=Plot(canvas,bounds or (r.field[0]-80,r.field[1]+80,r.field[2]-80,r.field[3]+80),footer=footer)
     xmin,xmax,ymin,ymax=r.field
     plot.line(np.array([[xmin,ymin],[xmax,ymin],[xmax,ymax],[xmin,ymax],[xmin,ymin]]),"#9eb0c5",1)
     points=np.array(r.waypoints,dtype=float).reshape((-1,2))
     plot.line(points,"#aab6c7",1,(4,3))
     for i,(x,y) in enumerate(points):
-        color="#cf3d4a" if i==selected else BLUE
+        color=BLUE
         plot.circle(x,y,5/plot.sx,color,color)
         plot.label(x,y,str(i+1),color)
     for x,y,radius in r.obstacles: plot.circle(x,y,radius,"#c58d42")
-    canvas.create_text(12,10,anchor="nw",text="路线编辑 · 点击空白添加 / 拖动打卡点 · 折线为编辑参考，尚未计算",fill=INK)
+    highlight_waypoints(plot,r.waypoints,selected)
+    canvas.create_text(12,10,anchor="nw",text=f"当前编辑：{mode} · 蓝圆=打卡 / 紫菱=辅助 · 折线仅参考，须重新计算",fill=INK,
+                       width=max(160,canvas.winfo_width()-24),tags="edit_mode")
+    auxiliary_marks(plot,project,auxiliary_selected)
     return plot
+
+
+def auxiliary_marks(plot: Plot, p: Project, selected: Iterable[int] = ()) -> None:
+    chosen=set(selected)
+    for i,(segment,x,y) in enumerate(p.route.auxiliary_points):
+        px,py=plot.xy(x,y);color="#9a4fb0";tag=f"auxiliary_{i+1}"
+        plot.canvas.create_polygon(px,py-6,px+6,py,px,py+6,px-6,py,outline=color,fill="#f2e5f8",width=1.5,tags=tag)
+        plot.canvas.create_text(px+8,py-8,text=f"辅{i+1}·段{int(segment)+1}",anchor="sw",fill=color,tags=tag)
+        if i in chosen:
+            tag=f"selected_auxiliary_{i+1}"
+            plot.canvas.create_polygon(px,py-10,px+10,py,px,py+10,px-10,py,outline="#a12fbd",fill="",width=3,tags=tag)
+            plot.canvas.create_text(px+10,py+10,text=f"选中辅{i+1}",anchor="nw",fill="#a12fbd",tags=tag)

@@ -48,7 +48,9 @@ class IndependentVerificationTests(unittest.TestCase):
         design = calculate(p)
         path = export_design(design, self.folder)['dxf']
         q = VerificationInput.from_project(p, design.stats['cam_usage']*360)
-        q.angle_step = 1
+        # The C2 route includes a real starting steering transient; use the
+        # current 0.5° default rather than weakening the 1.5 mm convergence gate.
+        q.angle_step = 0.5
         q.stability_mm = 1.5
         nominal = np.column_stack([np.degrees(design.cam_angle), np.degrees(design.cam_delta)])
         return path, q, design.target_path, nominal

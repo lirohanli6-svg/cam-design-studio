@@ -3,12 +3,15 @@ from __future__ import annotations
 import copy
 import math
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any, Callable
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .project import Project, ProjectError
+from .route_shape import required_nodes, sample_route
+from .cam_geometry import contact_evidence
+from .route_metrics import ordered_deviations
 
 Array = NDArray[np.float64]
 
@@ -40,6 +43,12 @@ class Result:
     pivot: Array = field(default_factory=lambda: np.zeros(2))
     contact_centers: Array = field(default_factory=lambda: np.empty((0, 2)))
     target_path: Array = field(default_factory=lambda: np.empty((0, 2)))
+
+    geometry: dict = field(default_factory=dict)
+    precision: dict = field(default_factory=dict)
+    candidate_audit: dict = field(default_factory=dict)
+    sampling: dict[str, Any] = field(default_factory=dict)
+    checkpoint_rows: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def valid(self) -> bool:
@@ -104,6 +113,18 @@ def validate(p: Project) -> None:
         for obstacle in r.obstacles:
             if len(obstacle) != 3 or not all(math.isfinite(x) for x in obstacle) or obstacle[2] <= 0:
                 raise ProjectError("每个障碍物输入 x,y,半径，半径应大于零。")
+        if not 0 < r.steer_rate_limit <= 10000:
+            raise ProjectError("转向变化速度上限须为 0～10000°/s 内的正数。")
+        if abs(r.start_steer)>v.max_steer:
+            raise ProjectError("起跑前轮角超出车辆限位。")
+        if len(r.auxiliary_points) > 40:
+            raise ProjectError("辅助点最多 40 个。")
+        segments = len(effective)-1
+        for segment,x,y in r.auxiliary_points:
+            if int(segment)!=segment or not 0 <= segment < segments:
+                raise ProjectError("辅助点的比赛段编号无效；起点不同于首个必过点时包含起点连接段。")
+            if not bounds[0] <= x <= bounds[1] or not bounds[2] <= y <= bounds[3]:
+                raise ProjectError("辅助点坐标必须在当前场地内。")
     except (TypeError, ValueError, OverflowError) as exc:
         if isinstance(exc, ProjectError):
             raise
@@ -125,44 +146,9 @@ def _abort(cancelled: Callable[[], bool] | None) -> None:
 
 
 def _route(p: Project, cancelled: Callable[[], bool] | None = None) -> Array:
-    r = p.route
-    points = np.asarray(r.waypoints, dtype=float)
-    start = np.array([r.start_x, r.start_y])
-    if np.linalg.norm(points[0]-start) > 0.01:
-        points = np.vstack([start, points])
-    chords = np.diff(points, axis=0)
-    lengths = np.linalg.norm(chords, axis=1)
-    directions = chords / lengths[:, None]
-    tangents = np.empty_like(points)
-    tangents[0] = [math.cos(_initial_heading(p)), math.sin(_initial_heading(p))]
-    tangents[-1] = directions[-1]
-    for i in range(1, len(points)-1):
-        tangent = directions[i-1]+directions[i]
-        if np.linalg.norm(tangent) < 0.05:
-            raise ProjectError(f"第 {i+1} 个路线节点接近原地掉头，请增加过渡点。")
-        tangents[i] = tangent / np.linalg.norm(tangent)
-        adjustment = math.radians(r.tangent_offsets[i-1]) if i-1 < len(r.tangent_offsets) else 0.0
-        x, y = tangents[i]
-        tangents[i] = [x*math.cos(adjustment)-y*math.sin(adjustment),
-                       x*math.sin(adjustment)+y*math.cos(adjustment)]
-    segments = []
-    for i, length in enumerate(lengths):
-        _abort(cancelled)
-        # Quintic Hermite: shared tangent and zero second derivative at knots.
-        # Route stays C2 while passing every ordered waypoint exactly.
-        delta = points[i+1]-points[i]
-        m0 = tangents[i]*length*r.tension
-        m1 = tangents[i+1]*length*r.tension
-        t = np.linspace(0, 1, max(12, int(length/r.step)*2+1))[:, None]
-        segment = (points[i]+m0*t+(10*delta-6*m0-4*m1)*t**3
-                   +(-15*delta+8*m0+7*m1)*t**4+(6*delta-3*m0-3*m1)*t**5)
-        s = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(segment, axis=0), axis=1))]
-        if np.any(np.diff(s) < 1e-9):
-            raise ProjectError("路线出现停滞或折返，请调整节点/张力。")
-        uniform = np.linspace(0, s[-1], int(math.ceil(s[-1]/r.step))+1)
-        piece = np.column_stack([np.interp(uniform, s, segment[:, j]) for j in range(2)])
-        segments.append(piece if i == 0 else piece[1:])
-    return np.vstack(segments)
+    k=math.tan(math.radians(p.route.start_steer))/p.vehicle.wheelbase
+    sensor_tangent=_initial_heading(p)+math.atan2(p.vehicle.sensor_x*k,1-p.vehicle.sensor_y*k)
+    return sample_route(p, sensor_tangent, cancelled)
 
 
 def _motion(path: Array, p: Project, cancelled: Callable[[], bool] | None = None) -> tuple[Array, Array, Array, Array, Array]:
@@ -194,7 +180,15 @@ def _motion(path: Array, p: Project, cancelled: Callable[[], bool] | None = None
         rear_s[i+1] = rear_s[i]+rear_step
         drive_s[i+1] = drive_s[i]+drive_step
         delta[i] = math.atan(v.wheelbase*change/rear_step)
-    delta[-1] = 2*delta[-2]-delta[-3] if len(delta) > 2 else delta[-2]
+    # The integrated turning angle belongs to the interval midpoint, not its
+    # left endpoint. Align it to node odometry before cam resampling; otherwise
+    # the initial steering and periodic pressure peak drift with route step.
+    midpoint_s = (rear_s[:-1]+rear_s[1:])/2
+    interval_delta = delta[:-1].copy()
+    delta = np.interp(rear_s, midpoint_s, interval_delta)
+    if len(interval_delta)>1:
+        delta[0] = interval_delta[0]+(rear_s[0]-midpoint_s[0])*(interval_delta[1]-interval_delta[0])/(midpoint_s[1]-midpoint_s[0])
+        delta[-1] = interval_delta[-1]+(rear_s[-1]-midpoint_s[-1])*(interval_delta[-1]-interval_delta[-2])/(midpoint_s[-1]-midpoint_s[-2])
     rear = path-np.column_stack([v.sensor_x*np.cos(heading)-v.sensor_y*np.sin(heading),
                                 v.sensor_x*np.sin(heading)+v.sensor_y*np.cos(heading)])
     return heading, rear, rear_s, drive_s, delta
@@ -225,17 +219,15 @@ def _scene_checks(result: Result) -> list[Check]:
                 break
     checks.append(Check("圆形障碍物", "fail" if hit else "pass",
                         "传感器/轮心轨迹与障碍物相交。" if hit else "传感器/轮心轨迹未进入障碍物（需另核对车壳和轮宽）。"))
-    # Search monotonically; a later lap must not validate an earlier ordered visit.
-    cursor = 0
-    deviations = []
-    for point in r.waypoints:
-        distances = np.linalg.norm(result.path[cursor:]-point, axis=1)
-        index = int(np.argmin(distances))
-        deviations.append(float(distances[index]))
-        cursor += index
+    result.checkpoint_rows = ordered_deviations(result.path,r.waypoints,r.tolerance)
+    deviations = [row["error_mm"] if row["error_mm"] is not None else math.inf for row in result.checkpoint_rows]
     result.stats["checkpoint_error"] = max(deviations)
-    checks.append(Check("顺序打卡", "pass" if max(deviations) <= r.tolerance+1e-6 else "fail",
-                        f"最大传感器偏差 {max(deviations):.3f} mm；统一容差 {r.tolerance:g} mm。"))
+    missed = [str(row["number"]) for row in result.checkpoint_rows if not row["passed"]]
+    checks.append(Check("顺序打卡", "fail" if missed else "pass",
+                        f"凸轮名义回算：{len(deviations)-len(missed)}/{len(deviations)} 个必过点在容差内；最大偏差 {max(deviations):.3f} mm；统一容差 {r.tolerance:g} mm。"+
+                        ("漏点编号："+"、".join(missed)+"。" if missed else "不要求回算曲线恰好穿过圆心。")))
+    if not len(result.profile):
+        checks[-1] = Check("顺序打卡","warn","未生成有效凸轮轮廓，逐点名义回算未验证；设计曲线经过点位不能作为凸轮打卡通过依据。")
     steering = float(np.degrees(np.abs(result.delta)).max())
     result.stats["max_steer"] = steering
     checks.append(Check("前轮转角", "pass" if steering <= v.max_steer else "fail",
@@ -243,7 +235,7 @@ def _scene_checks(result: Result) -> list[Check]:
     return checks
 
 
-def calculate(project: Project, cancelled: Callable[[], bool] | None = None) -> Result:
+def calculate(project: Project, cancelled: Callable[[], bool] | None = None, *, precision: bool = True) -> Result:
     _abort(cancelled)
     p = copy.deepcopy(project)
     validate(p)
@@ -258,6 +250,55 @@ def calculate(project: Project, cancelled: Callable[[], bool] | None = None) -> 
     _replay(result, cancelled)
     _abort(cancelled)
     result.checks.extend(_scene_checks(result))
+    rate = float(np.max(np.abs(np.gradient(np.degrees(delta), rear_s/p.vehicle.speed))))
+    result.stats["max_steer_rate"] = rate
+    result.checks.append(Check("转向变化速度", "pass" if rate <= p.route.steer_rate_limit else "fail",
+                              f"比赛段最大 {rate:.3f}°/s；规划限值 {p.route.steer_rate_limit:g}°/s（理论恒速）。"))
+    if precision and len(result.profile):
+        # Re-run the entire design at half route step and twice angular density.
+        # Internal refinement is separate from user input range validation.
+        fine_p = copy.deepcopy(p)
+        fine_p.route.step = max(1., p.route.step/2)
+        fine_p.cam.points = min(4000, int(result.stats["cam_points_used"])*2)
+        try:
+            fine = calculate(fine_p, cancelled, precision=False)
+        except ProjectError as exc:
+            _abort(cancelled)
+            result.precision=dict(stable=False, refined=True, error=str(exc),
+                                  route_step=[p.route.step,fine_p.route.step],cam_points=[p.cam.points,fine_p.cam.points])
+            result.checks.append(Check("精度复算约束", "fail", f"细采样无法完成：{exc}；粗采样不能作为通过依据。"))
+            return result
+        if not len(fine.profile):
+            result.precision=dict(stable=False,refined=True,error="细采样未生成有效轮廓")
+            result.checks.append(Check("精度复算约束", "fail", "细采样未生成有效轮廓，不能比较压力/曲率/间隙，禁止按粗采样判断通过。"))
+            return result
+        keys = ("max_pressure", "min_curvature_radius", "min_contact_gap")
+        limits = (0.5, max(.1, p.mechanism.roller*.05), .02)
+        metrics = {}
+        stable = True
+        for key,limit in zip(keys,limits):
+            coarse, refined = result.stats.get(key), fine.stats.get(key)
+            difference = abs(refined-coarse) if coarse is not None and refined is not None else float("inf")
+            if coarse == refined: difference = 0.
+            metrics[key] = dict(coarse=coarse, fine=refined, difference=difference, tolerance=limit)
+            stable = stable and difference <= limit
+        names = {"压力角", "局部过切", "全局接触干涉"}
+        statuses = {c.name:c.status for c in result.checks if c.name in names}
+        refined_statuses = {c.name:c.status for c in fine.checks if c.name in names}
+        stable = stable and statuses==refined_statuses
+        coarse_points = int(result.stats["cam_points_used"])
+        fine_points = int(fine.stats["cam_points_used"])
+        refined = fine_p.route.step < p.route.step and fine_points > coarse_points
+        result.precision = dict(stable=bool(stable and refined), refined=refined, metrics=metrics,
+                                route_step=[p.route.step,fine_p.route.step], cam_points=[coarse_points,fine_points],
+                                requested_cam_points=[p.cam.points,fine_p.cam.points],
+                                coarse_status=statuses, fine_status=refined_statuses)
+        text = "; ".join(f"{key}: {row['coarse']:.5g} → {row['fine']:.5g}，差 {row['difference']:.4g} / 稳定阈值 {row['tolerance']:.4g}" for key,row in metrics.items())
+        result.checks.append(Check("主设计采样复算", "pass" if stable and refined else "warn",
+                                  ("采样结果稳定；" if stable and refined else "未确认稳定，请提高精度/核对问题区间；")+text+
+                                  f"。路线步长 {p.route.step:g}→{fine_p.route.step:g} mm，实际轮廓点数 {coarse_points}→{fine_points}（触顶未加密时不判稳定）；有限采样不是连续几何证明。"))
+        if any(value=="fail" and statuses.get(name)!="fail" for name,value in refined_statuses.items()):
+            result.checks.append(Check("精度复算约束", "fail", "细采样出现新增不通过项，禁止按粗采样通过判断；详情见主设计采样复算。"))
     return result
 
 
@@ -307,6 +348,38 @@ def _interpolate_cubic(x: Array, y: Array, target: Array) -> Array:
             +(-2*t**3+3*t**2)*y[index+1]+(t**3-t**2)*h*slopes[index+1])
 
 
+def _sample_cam_steering(result: Result, points: int) -> tuple[Array, Array]:
+    p = result.project
+    phi_run = result.drive_s/(math.pi*p.vehicle.drive_diameter*p.cam.ratio)*2*math.pi
+    phi = np.linspace(0, 2*math.pi, int(points), endpoint=False)
+    run = phi <= phi_run[-1]
+    steering = np.empty(len(phi))
+    steering[run] = _interpolate_cubic(phi_run, result.delta, phi[run])
+    # Close unused sector with matching value/slope. Use zero return endpoint
+    # acceleration rather than amplifying noisy one-sided second differences.
+    span = 2*math.pi-phi_run[-1]
+    d1 = np.gradient(result.delta, phi_run)
+    # Keep endpoint derivative matching local: extending it over the whole
+    # spare sector can create a huge non-race overshoot. Settle at both ends,
+    # then use a C2 rest-to-rest return between those settling intervals.
+    settle = min(.15, span/4)
+    end_slope, start_slope = d1[-1], d1[0]
+    departure = result.delta[-1]+end_slope*settle*.2
+    arrival = result.delta[0]-start_slope*settle*.2
+    def hermite(u: Array, y0: float, y1: float, s0: float, s1: float, width: float) -> Array:
+        m0,m1=s0*width,s1*width
+        change=y1-y0
+        return y0+m0*u+(10*change-6*m0-4*m1)*u**3+(-15*change+8*m0+7*m1)*u**4+(6*change-3*m0-3*m1)*u**5
+    elapsed=phi[~run]-phi_run[-1]
+    values=np.empty(len(elapsed))
+    head=elapsed<settle; tail=elapsed>span-settle; middle=~(head|tail)
+    values[head]=hermite(elapsed[head]/settle,float(result.delta[-1]),float(departure),float(end_slope),0.,settle)
+    values[middle]=hermite((elapsed[middle]-settle)/(span-2*settle),float(departure),float(arrival),0.,0.,span-2*settle)
+    values[tail]=hermite((elapsed[tail]-(span-settle))/settle,float(arrival),float(result.delta[0]),0.,float(start_slope),settle)
+    steering[~run]=values
+    return phi, steering
+
+
 def _cam(result: Result, cancelled: Callable[[], bool] | None = None) -> None:
     p = result.project
     m, c, v = p.mechanism, p.cam, p.vehicle
@@ -320,19 +393,28 @@ def _cam(result: Result, cancelled: Callable[[], bool] | None = None) -> None:
     if usage >= 0.98:
         result.checks.append(Check("凸轮未生成", "fail", "一圈容量不足；请增大轮→凸轮减速比，禁止截取轮廓。"))
         return
-    phi = np.linspace(0, 2*math.pi, int(c.points), endpoint=False)
-    run = phi <= phi_run[-1]
-    steering = np.empty(len(phi))
-    steering[run] = _interpolate_cubic(phi_run, result.delta, phi[run])
-    # Close unused sector with matching value/slope. Use zero return endpoint
-    # acceleration rather than amplifying noisy one-sided second differences.
-    span = 2*math.pi-phi_run[-1]
-    d1 = np.gradient(result.delta, phi_run)
-    a0, a1, a2 = result.delta[-1], d1[-1]*span, 0.0
-    rhs = [result.delta[0]-a0-a1-a2, d1[0]*span-a1-2*a2, 0.0]
-    a3, a4, a5 = np.linalg.solve([[1, 1, 1], [3, 4, 5], [6, 12, 20]], rhs)
-    t = (phi[~run]-phi_run[-1])/span
-    steering[~run] = a0+a1*t+a2*t**2+a3*t**3+a4*t**4+a5*t**5
+    requested = int(c.points)
+    count = requested
+    attempts = []
+    while True:
+        _abort(cancelled)
+        phi, steering = _sample_cam_steering(result,count)
+        sensor, _, _ = _simulate_steering(result,np.r_[phi,2*math.pi],np.r_[steering,steering[0]],cancelled)
+        replay_error = float(np.linalg.norm(sensor-result.path,axis=1).max())
+        visits = ordered_deviations(sensor,p.route.waypoints,p.route.tolerance)
+        checkpoint_error = max(row["error_mm"] if row["error_mm"] is not None else math.inf for row in visits)
+        passed = checkpoint_error <= p.route.tolerance+1e-6 and replay_error <= max(p.route.tolerance,.1)
+        attempts.append(dict(points=count,replay_error_mm=replay_error,checkpoint_error_mm=checkpoint_error,
+                             missed=[row["number"] for row in visits if not row["passed"]],passed=passed))
+        if passed or count>=4000: break
+        count = min(4000,count*2)
+    result.sampling = dict(requested=requested,used=count,attempts=attempts,passed=passed,
+                           limit=4000,automatic=count!=requested)
+    result.stats.update(cam_points_requested=float(requested),cam_points_used=float(count))
+    result.checks.append(Check("凸轮采样检查","pass" if passed else "fail",
+        f"请求 {requested} 点，实际 {count} 点；名义回算最大偏差 {replay_error:.3f} mm，必过点最大偏差 {checkpoint_error:.3f} mm / {p.route.tolerance:g} mm。"+
+        ("已按实际回算误差自动加密，未改硬件、必过点或容差。" if count!=requested else "")+
+        ("有限采样，最终DXF仍须独立检验。" if passed else "已达4000点上限仍未满足，不能按设计曲线经过点位就认定打卡通过。")))
     centers, velocities, pivot = follower_positions(steering, p)
     if m.kind == "flat":
         low, high = min(float(steering.min()), math.radians(m.steer_zero)), max(float(steering.max()), math.radians(m.steer_zero))
@@ -398,35 +480,23 @@ def _cam(result: Result, cancelled: Callable[[], bool] | None = None) -> None:
     result.contact_centers = np.vstack([centers, centers[0]])
     # Global roller-envelope interference: the local normal offset alone is
     # insufficient when a distant lobe intrudes into the roller circle.
-    start, segment = profile, np.roll(profile, -1, axis=0)-profile
-    lengths2 = np.sum(segment**2, axis=1)
-    interference = False
-    for center in pitch:
-        _abort(cancelled)
-        t_contact = np.clip(np.sum((center-start)*segment, axis=1)/np.maximum(lengths2, 1e-16), 0, 1)
-        distances = np.linalg.norm(center-start-t_contact[:, None]*segment, axis=1)
-        if float(distances.min()) < m.roller-max(0.02, m.roller*0.01):
-            interference = True
-            break
+    evidence = contact_evidence(pitch, profile, m.roller, cancelled)
+    result.geometry = evidence
+    gap = evidence["minimum"]
+    result.stats["min_contact_gap"] = gap
+    result.stats["undercut_margin"] = rho-m.roller*1.01
+    interference = gap < -max(.02,m.roller*.01)
     result.checks.append(Check("全局接触干涉", "fail" if interference else "pass",
-                              "存在其他轮廓侵入滚子/球；需改路线或机构。" if interference else
-                              "离散全周期接触检查通过；加工前仍需 CAD 干涉复核。"))
+                              f"整圈最小间隙 {gap:.5f} mm，允许离散误差 {-max(.02,m.roller*.01):.4f} mm；负值为轮廓侵入滚子/球。有限采样须另做加工/装配复核。"))
 
 
-def _replay(result: Result, cancelled: Callable[[], bool] | None = None) -> None:
-    """Forward integrate steering resampled from the generated cam schedule.
-
-    This independently checks loss due to cam angular sampling; it is a
-    nominal kinematic check, not a dynamics/contact-force simulation.
-    """
-    result.target_path = result.path.copy()
-    if not len(result.profile):
-        return
+def _simulate_steering(result: Result, angles: Array, steering: Array,
+                       cancelled: Callable[[], bool] | None = None) -> tuple[Array, Array, Array]:
     p, v = result.project, result.project.vehicle
     drive_y = v.track/2 * (1 if v.drive_side == "left" else -1)
     phi = result.drive_s/(math.pi*v.drive_diameter*p.cam.ratio)*2*math.pi
     mid_phi = (phi[1:]+phi[:-1])/2
-    delta = np.interp(mid_phi, result.cam_angle, result.cam_delta)
+    delta = np.interp(mid_phi, angles, steering)
     rear = np.empty_like(result.rear)
     heading = np.empty_like(result.heading)
     rear[0], heading[0] = result.rear[0], result.heading[0]
@@ -445,6 +515,20 @@ def _replay(result: Result, cancelled: Callable[[], bool] | None = None) -> None
         heading[i+1] = heading[i]+angle
     sensor = rear+np.column_stack([v.sensor_x*np.cos(heading)-v.sensor_y*np.sin(heading),
                                    v.sensor_x*np.sin(heading)+v.sensor_y*np.cos(heading)])
+    return sensor, rear, heading
+
+
+def _replay(result: Result, cancelled: Callable[[], bool] | None = None) -> None:
+    """Forward integrate steering resampled from the generated cam schedule.
+
+    This independently checks loss due to cam angular sampling; it is a
+    nominal kinematic check, not a dynamics/contact-force simulation.
+    """
+    result.target_path = result.path.copy()
+    if not len(result.profile):
+        return
+    p = result.project
+    sensor, rear, heading = _simulate_steering(result,result.cam_angle,result.cam_delta,cancelled)
     error = float(np.linalg.norm(sensor-result.target_path, axis=1).max())
     result.stats["replay_error"] = error
     result.path, result.rear, result.heading = sensor, rear, heading
@@ -461,7 +545,7 @@ def optimize(project: Project, progress: Callable[[str], None] | None = None,
     """
     validate(project)
     try:
-        best = calculate(project, cancelled)
+        best = calculate(project, cancelled, precision=False)
     except ProjectError as initial_error:
         recovered: Result | None = None
         for offset in (0.15, -0.15, 0.3, -0.3, 0.45, -0.45, 0.6):
@@ -472,7 +556,7 @@ def optimize(project: Project, progress: Callable[[str], None] | None = None,
             if progress:
                 progress(f"寻找可计算初始路线 · 张力 {candidate.route.tension:.2f}")
             try:
-                recovered = calculate(candidate, cancelled)
+                recovered = calculate(candidate, cancelled, precision=False)
                 break
             except ProjectError:
                 continue
@@ -484,6 +568,9 @@ def optimize(project: Project, progress: Callable[[str], None] | None = None,
         s, p = result.stats, result.project
         fails = sum(c.status == "fail" for c in result.checks)
         violation = (max(0.0, s.get("max_pressure", 180)/p.cam.pressure_limit-1)
+                     +max(0., -s.get("undercut_margin", -1e6))/p.mechanism.roller
+                     +max(0., -s.get("min_contact_gap", -1e6)-max(.02,p.mechanism.roller*.01))/p.mechanism.roller
+                     +max(0., s["max_steer_rate"]/p.route.steer_rate_limit-1)
                      +max(0.0, s["max_steer"]/p.vehicle.max_steer-1)
                      +max(0.0, s.get("checkpoint_error", 1e6)/max(p.route.tolerance, 0.1)-1)
                      +max(0.0, s.get("stroke_max", 0)-p.mechanism.max_stroke)/p.mechanism.arm
@@ -496,10 +583,8 @@ def optimize(project: Project, progress: Callable[[str], None] | None = None,
     attempts = 0
     for cycle in range(int(project.optimization.iterations)):
         seed = best.project
-        # At most eight local knots per cycle keeps the first version usable
-        # on a modest CPU, even for a long checkpoint table.
-        count = max(0, len(seed.route.waypoints)-2)
-        knots = list(range(count))[:8]
+        count = max(0, len(required_nodes(seed))-2)
+        knots = list(range(count))
         for knob in [-1, *knots]:
             for direction in [-1, 1]:
                 if cancelled and cancelled():
@@ -516,11 +601,20 @@ def optimize(project: Project, progress: Callable[[str], None] | None = None,
                 if progress:
                     progress(f"优化第 {cycle+1}/{project.optimization.iterations} 轮 · 候选 {attempts}")
                 try:
-                    result = calculate(candidate, cancelled)
+                    result = calculate(candidate, cancelled, precision=False)
                 except ProjectError:
                     continue
                 if rank(result) < rank(best):
                     best = result
     _abort(cancelled)
+    best = calculate(best.project, cancelled)
+    if len(best.profile):
+        from .candidate_audit import audit_candidate
+        audit, _ = audit_candidate(best, cancelled)
+        best.candidate_audit = dict(sha256=audit.sha256, passed=audit.kinematic_pass,
+                                   checks=[vars(c) for c in audit.checks])
+        best.checks.append(Check("候选DXF独立检验", "pass" if audit.kinematic_pass else "fail",
+                                  f"最终导出轮廓 SHA256 {audit.sha256}；从轮廓重新求接触、转角和计划段轨迹。"+
+                                  "；".join(c.name+"："+c.detail for c in audit.checks if c.status=="不通过")))
     best.checks.append(Check("本地优化", "warn", f"已比较 {attempts} 个候选；采用局部张力/切线搜索，不保证全局最优。"))
     return best

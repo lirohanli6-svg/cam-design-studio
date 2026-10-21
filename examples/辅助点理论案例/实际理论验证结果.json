@@ -1,0 +1,482 @@
+{
+  "software_version": "1.5.0",
+  "kind": "theoretical_not_measured",
+  "cases": {
+    "直线与圆形凸轮": {
+      "metrics": {
+        "drive_distance": 1000.0,
+        "rear_distance": 1000.0,
+        "sensor_distance": 1000.0,
+        "wheel_turns": 2.4485375860291594,
+        "time": 12.5,
+        "cam_usage": 0.15303359912682246,
+        "cam_rpm_mean": 0.7345612758087479,
+        "max_pressure": 1.2074182697257333e-06,
+        "min_curvature_radius": 56.99960932834634,
+        "min_profile_radius": 54.99999999999999,
+        "max_profile_radius": 55.00000000000001,
+        "stroke_min": 0.0,
+        "stroke_max": 0.0,
+        "min_contact_gap": -4.6629367034256575e-15,
+        "undercut_margin": 54.979609328346335,
+        "replay_error": 0.0,
+        "checkpoint_error": 0.0,
+        "max_steer": 0.0,
+        "max_steer_rate": 0.0
+      },
+      "main_pass": true,
+      "precision": {
+        "stable": true,
+        "refined": true,
+        "metrics": {
+          "max_pressure": {
+            "coarse": 1.2074182697257333e-06,
+            "fine": 1.2074182697257333e-06,
+            "difference": 0.0,
+            "tolerance": 0.5
+          },
+          "min_curvature_radius": {
+            "coarse": 56.99960932834634,
+            "fine": 56.99990232919574,
+            "difference": 0.00029300084940331317,
+            "tolerance": 0.1
+          },
+          "min_contact_gap": {
+            "coarse": -4.6629367034256575e-15,
+            "fine": -4.440892098500626e-15,
+            "difference": 2.220446049250313e-16,
+            "tolerance": 0.02
+          }
+        },
+        "route_step": [
+          5.0,
+          2.5
+        ],
+        "cam_points": [
+          1200,
+          2400
+        ],
+        "coarse_status": {
+          "压力角": "pass",
+          "局部过切": "pass",
+          "全局接触干涉": "pass"
+        },
+        "fine_status": {
+          "压力角": "pass",
+          "局部过切": "pass",
+          "全局接触干涉": "pass"
+        }
+      },
+      "independent_pass": true,
+      "independent_failures": []
+    },
+    "已知圆弧": {
+      "metrics": {
+        "drive_distance": 1130.962225751737,
+        "rear_distance": 1047.19485569696,
+        "sensor_distance": 1049.078774777784,
+        "wheel_turns": 2.769203518132323,
+        "time": 13.089935696212,
+        "cam_usage": 0.17307521988327018,
+        "cam_rpm_mean": 0.7933204130255054,
+        "max_pressure": 0.684216715305754,
+        "min_curvature_radius": 50.85691236121249,
+        "min_profile_radius": 57.9270724479269,
+        "max_profile_radius": 57.984109156190144,
+        "stroke_min": 2.927072447240249,
+        "stroke_max": 2.9841091528953996,
+        "min_contact_gap": -4.440892098500626e-15,
+        "undercut_margin": 48.836912361212484,
+        "replay_error": 0.03302615390619727,
+        "checkpoint_error": 0.03302615390629549,
+        "max_steer": 6.855874211557176,
+        "max_steer_rate": 0.13777745641461395
+      },
+      "main_pass": true,
+      "precision": {
+        "stable": false,
+        "refined": true,
+        "metrics": {
+          "max_pressure": {
+            "coarse": 0.684216715305754,
+            "fine": 0.7110794795863306,
+            "difference": 0.026862764280576545,
+            "tolerance": 0.5
+          },
+          "min_curvature_radius": {
+            "coarse": 50.85691236121249,
+            "fine": 50.56762796072075,
+            "difference": 0.28928440049173787,
+            "tolerance": 0.1
+          },
+          "min_contact_gap": {
+            "coarse": -4.440892098500626e-15,
+            "fine": -4.884981308350689e-15,
+            "difference": 4.440892098500626e-16,
+            "tolerance": 0.02
+          }
+        },
+        "route_step": [
+          5.0,
+          2.5
+        ],
+        "cam_points": [
+          1200,
+          2400
+        ],
+        "coarse_status": {
+          "压力角": "pass",
+          "局部过切": "pass",
+          "全局接触干涉": "pass"
+        },
+        "fine_status": {
+          "压力角": "pass",
+          "局部过切": "pass",
+          "全局接触干涉": "pass"
+        }
+      },
+      "independent_pass": true,
+      "independent_failures": []
+    },
+    "连续弯道_无辅助": {
+      "metrics": {
+        "drive_distance": 4267.630468529397,
+        "rear_distance": 4249.854890641213,
+        "sensor_distance": 4252.483505844044,
+        "wheel_turns": 10.44945360547746,
+        "time": 53.12318613301517,
+        "cam_usage": 0.6530908503423413,
+        "cam_rpm_mean": 0.7376336751042004,
+        "max_pressure": 38.50856227387056,
+        "min_curvature_radius": 4.265005932424016,
+        "min_profile_radius": 50.9239556616688,
+        "max_profile_radius": 57.920598169582824,
+        "stroke_min": -4.076051951871321,
+        "stroke_max": 2.920598147684032,
+        "min_contact_gap": -0.0012375761256471218,
+        "undercut_margin": 2.2450059324240157,
+        "replay_error": 0.3889806766713408,
+        "checkpoint_error": 0.38898067667106,
+        "max_steer": 9.38198635755888,
+        "max_steer_rate": 7.999130102539739
+      },
+      "main_pass": true,
+      "precision": {
+        "stable": false,
+        "refined": true,
+        "metrics": {
+          "max_pressure": {
+            "coarse": 38.50856227387056,
+            "fine": 40.48258607260739,
+            "difference": 1.9740237987368303,
+            "tolerance": 0.5
+          },
+          "min_curvature_radius": {
+            "coarse": 4.265005932424016,
+            "fine": 4.05049667429464,
+            "difference": 0.21450925812937527,
+            "tolerance": 0.1
+          },
+          "min_contact_gap": {
+            "coarse": -0.0012375761256471218,
+            "fine": -0.00029567940793451264,
+            "difference": 0.0009418967177126092,
+            "tolerance": 0.02
+          }
+        },
+        "route_step": [
+          5.0,
+          2.5
+        ],
+        "cam_points": [
+          1200,
+          2400
+        ],
+        "coarse_status": {
+          "压力角": "pass",
+          "局部过切": "pass",
+          "全局接触干涉": "pass"
+        },
+        "fine_status": {
+          "压力角": "pass",
+          "局部过切": "pass",
+          "全局接触干涉": "pass"
+        }
+      },
+      "independent_pass": true,
+      "independent_failures": []
+    },
+    "连续弯道_偏置辅助": {
+      "metrics": {
+        "drive_distance": 4316.541710640547,
+        "rear_distance": 4298.766132752369,
+        "sensor_distance": 4306.334406013317,
+        "wheel_turns": 10.569214620165981,
+        "time": 53.73457665940462,
+        "cam_usage": 0.6605759137603738,
+        "cam_rpm_mean": 0.7375987174300292,
+        "max_pressure": 57.34726295814192,
+        "min_curvature_radius": 4.025276090510542,
+        "min_profile_radius": 46.00768204447371,
+        "max_profile_radius": 61.924660210931265,
+        "stroke_min": -8.99325045433008,
+        "stroke_max": 6.924493240479364,
+        "min_contact_gap": -0.004722090432151438,
+        "undercut_margin": 2.005276090510542,
+        "replay_error": 0.9891861203198662,
+        "checkpoint_error": 0.9891861203195277,
+        "max_steer": 21.042693688236202,
+        "max_steer_rate": 16.609901045489778
+      },
+      "main_pass": false,
+      "precision": {
+        "stable": false,
+        "refined": true,
+        "metrics": {
+          "max_pressure": {
+            "coarse": 57.34726295814192,
+            "fine": 58.01092639106538,
+            "difference": 0.6636634329234639,
+            "tolerance": 0.5
+          },
+          "min_curvature_radius": {
+            "coarse": 4.025276090510542,
+            "fine": 4.02108224978049,
+            "difference": 0.00419384073005169,
+            "tolerance": 0.1
+          },
+          "min_contact_gap": {
+            "coarse": -0.004722090432151438,
+            "fine": -0.0012004057299959126,
+            "difference": 0.0035216847021555253,
+            "tolerance": 0.02
+          }
+        },
+        "route_step": [
+          5.0,
+          2.5
+        ],
+        "cam_points": [
+          1200,
+          2400
+        ],
+        "coarse_status": {
+          "压力角": "fail",
+          "局部过切": "pass",
+          "全局接触干涉": "pass"
+        },
+        "fine_status": {
+          "压力角": "fail",
+          "局部过切": "pass",
+          "全局接触干涉": "pass"
+        }
+      },
+      "independent_pass": false,
+      "independent_failures": [
+        {
+          "name": "精度收敛",
+          "status": "不通过",
+          "detail": "角步长减半、接触容差收紧至 1/5：轨迹差 1.35285/1 mm，公共角转角差 0.000000/0.1°；仍为有限采样数值稳定性检验。"
+        }
+      ]
+    },
+    "必过起点障碍_不可行": {
+      "metrics": {
+        "drive_distance": 4267.630468529397,
+        "rear_distance": 4249.854890641213,
+        "sensor_distance": 4252.483505844044,
+        "wheel_turns": 10.44945360547746,
+        "time": 53.12318613301517,
+        "cam_usage": 0.6530908503423413,
+        "cam_rpm_mean": 0.7376336751042004,
+        "max_pressure": 38.50856227387056,
+        "min_curvature_radius": 4.265005932424016,
+        "min_profile_radius": 50.9239556616688,
+        "max_profile_radius": 57.920598169582824,
+        "stroke_min": -4.076051951871321,
+        "stroke_max": 2.920598147684032,
+        "min_contact_gap": -0.0012375761256471218,
+        "undercut_margin": 2.2450059324240157,
+        "replay_error": 0.3889806766713408,
+        "checkpoint_error": 0.38898067667106,
+        "max_steer": 9.38198635755888,
+        "max_steer_rate": 7.999130102539739
+      },
+      "main_pass": false,
+      "precision": {
+        "stable": false,
+        "refined": true,
+        "metrics": {
+          "max_pressure": {
+            "coarse": 38.50856227387056,
+            "fine": 40.48258607260739,
+            "difference": 1.9740237987368303,
+            "tolerance": 0.5
+          },
+          "min_curvature_radius": {
+            "coarse": 4.265005932424016,
+            "fine": 4.05049667429464,
+            "difference": 0.21450925812937527,
+            "tolerance": 0.1
+          },
+          "min_contact_gap": {
+            "coarse": -0.0012375761256471218,
+            "fine": -0.00029567940793451264,
+            "difference": 0.0009418967177126092,
+            "tolerance": 0.02
+          }
+        },
+        "route_step": [
+          5.0,
+          2.5
+        ],
+        "cam_points": [
+          1200,
+          2400
+        ],
+        "coarse_status": {
+          "压力角": "pass",
+          "局部过切": "pass",
+          "全局接触干涉": "pass"
+        },
+        "fine_status": {
+          "压力角": "pass",
+          "局部过切": "pass",
+          "全局接触干涉": "pass"
+        }
+      },
+      "independent_pass": false,
+      "independent_failures": [
+        {
+          "name": "圆形障碍物",
+          "status": "不通过",
+          "detail": "检查轨迹线段到圆障碍物的距离；仅覆盖传感器与轮心。"
+        }
+      ]
+    },
+    "顶球连续弯道": {
+      "metrics": {
+        "drive_distance": 4267.630468529397,
+        "rear_distance": 4249.854890641213,
+        "sensor_distance": 4252.483505844044,
+        "wheel_turns": 10.44945360547746,
+        "time": 53.12318613301517,
+        "cam_usage": 0.6530908503423413,
+        "cam_rpm_mean": 0.7376336751042004,
+        "max_pressure": 38.49551134061221,
+        "min_curvature_radius": 4.436322759176029,
+        "min_profile_radius": 50.92571107932548,
+        "max_profile_radius": 57.921025949621836,
+        "stroke_min": -4.075353025225333,
+        "stroke_max": 2.920781343663151,
+        "min_contact_gap": -0.0012002083825188858,
+        "undercut_margin": 2.4163227591760292,
+        "replay_error": 0.3889806766713408,
+        "checkpoint_error": 0.38898067667106,
+        "max_steer": 9.38198635755888,
+        "max_steer_rate": 7.999130102539739
+      },
+      "main_pass": true,
+      "precision": {
+        "stable": false,
+        "refined": true,
+        "metrics": {
+          "max_pressure": {
+            "coarse": 38.49551134061221,
+            "fine": 40.490052625514146,
+            "difference": 1.9945412849019348,
+            "tolerance": 0.5
+          },
+          "min_curvature_radius": {
+            "coarse": 4.436322759176029,
+            "fine": 4.225841302201207,
+            "difference": 0.21048145697482212,
+            "tolerance": 0.1
+          },
+          "min_contact_gap": {
+            "coarse": -0.0012002083825188858,
+            "fine": -0.000288218184571587,
+            "difference": 0.0009119901979472989,
+            "tolerance": 0.02
+          }
+        },
+        "route_step": [
+          5.0,
+          2.5
+        ],
+        "cam_points": [
+          1200,
+          2400
+        ],
+        "coarse_status": {
+          "压力角": "pass",
+          "局部过切": "pass",
+          "全局接触干涉": "pass"
+        },
+        "fine_status": {
+          "压力角": "pass",
+          "局部过切": "pass",
+          "全局接触干涉": "pass"
+        }
+      },
+      "independent_pass": true,
+      "independent_failures": []
+    },
+    "辅助点搜索": {
+      "status": "有排名改善；主设计几何通过；主设计采样稳定性未确认；DXF独立运动学通过。候选仅供比较，原方案已保留。",
+      "before": {
+        "drive_distance": 4316.541710640547,
+        "rear_distance": 4298.766132752369,
+        "sensor_distance": 4306.334406013317,
+        "wheel_turns": 10.569214620165981,
+        "time": 53.73457665940462,
+        "cam_usage": 0.6605759137603738,
+        "cam_rpm_mean": 0.7375987174300292,
+        "max_pressure": 57.34726295814192,
+        "min_curvature_radius": 4.025276090510542,
+        "min_profile_radius": 46.00768204447371,
+        "max_profile_radius": 61.924660210931265,
+        "stroke_min": -8.99325045433008,
+        "stroke_max": 6.924493240479364,
+        "min_contact_gap": -0.004722090432151438,
+        "undercut_margin": 2.005276090510542,
+        "replay_error": 0.9891861203198662,
+        "checkpoint_error": 0.9891861203195277,
+        "max_steer": 21.042693688236202,
+        "max_steer_rate": 16.609901045489778
+      },
+      "after": {
+        "drive_distance": 4268.0043046752635,
+        "rear_distance": 4250.156784148006,
+        "sensor_distance": 4252.786498180464,
+        "wheel_turns": 10.45036895733163,
+        "time": 53.12695980185008,
+        "cam_usage": 0.6531480598332269,
+        "cam_rpm_mean": 0.7376458908275213,
+        "max_pressure": 38.50856227387056,
+        "min_curvature_radius": 4.265005932424016,
+        "min_profile_radius": 50.9239556616688,
+        "max_profile_radius": 57.920598169582824,
+        "stroke_min": -4.076051951871321,
+        "stroke_max": 2.920598147684032,
+        "min_contact_gap": -0.0012375761256471218,
+        "undercut_margin": 2.2450059324240157,
+        "replay_error": 0.3887892324388971,
+        "checkpoint_error": 0.38878923243861657,
+        "max_steer": 9.38198635755888,
+        "max_steer_rate": 7.999130102539739
+      },
+      "auxiliary_points": [
+        [
+          3.0,
+          3855.432144762551,
+          590.2464076119378
+        ]
+      ],
+      "attempts": 12,
+      "improved": true,
+      "independent_pass": true
+    }
+  },
+  "limitations": "有限采样理论模型；未进行实车试验，案例不是用户实际项目。"
+}

@@ -72,7 +72,7 @@ class ProjectWorkflowTests(unittest.TestCase):
 
     def test_optimization_searches_when_initial_route_cannot_be_calculated(self):
         p = Project.demo()
-        p.mechanism.pivot_x = -104.6
+        p.mechanism.pivot_x = -104.7
         p.cam.pressure_limit = 60
         p.optimization.iterations = 1
         result = optimize(p)

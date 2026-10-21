@@ -2,8 +2,8 @@
 from pathlib import Path
 
 APP_NAME = "太阳能小车 · 凸轮设计工作台"
-VERSION = "1.3.0"
-RELEASE_DATE = "2026-10-20"
+VERSION = "1.7.0"
+RELEASE_DATE = "2026-10-21"
 
 
 def changelog_text() -> str:

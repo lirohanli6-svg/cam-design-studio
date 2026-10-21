@@ -65,7 +65,7 @@ class WorkbenchTests(unittest.TestCase):
     def test_comparison_truthfully_reports_no_improvement_and_tradeoffs(self):
         pair=PlanComparison.capture(self.normal,self.normal)
         self.assertIn('未改善',pair.verdict())
-        self.assertEqual(len(comparison_metrics(self.normal)),5)
+        self.assertEqual(len(comparison_metrics(self.normal)),8)
         pair.optimized.stats['max_pressure']*=.9
         pair.optimized.stats['max_steer']*=1.1
         self.assertIn('取舍',pair.verdict())

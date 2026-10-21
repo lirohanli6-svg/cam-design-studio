@@ -102,6 +102,7 @@ class WorkbenchPages:
 
     def _issues(self) -> None:
         page=self.frames["issues"]
+        ttk.Button(page,text='定位并放大（场地/凸轮）',command=self.app.focus_problem,width=28,style='Compact.TButton').pack(anchor='w',padx=5,pady=2)
         ttk.Label(page,text="点击检查行同步定位：路线位置 / 凸轮角 / 曲线。回程段不映射到比赛路线；建议依据当前模型，不保证调整后通过。",padding=6,wraplength=1200).pack(fill="x")
         panel=ttk.Frame(page); panel.pack(fill="x")
         self.issue_tree=ttk.Treeview(panel,columns=("status","name","actual","limit"),show="headings",height=5,selectmode="browse")
@@ -125,12 +126,19 @@ class WorkbenchPages:
         row=ttk.Frame(page,padding=5); row.pack(fill="x")
         for text,command in [("运行本地优化",lambda:self.app.run(True)),("保留原方案",lambda:self.adopt(False)),
                              ("采用优化方案",lambda:self.adopt(True)),("保存两套方案与对比",self.export_comparison)]:
-            ttk.Button(row,text=text,command=command,width=22).pack(side="left",padx=2)
+            ttk.Button(row,text=text,command=command,width=20,style="Compact.TButton").pack(side="left",padx=2)
         ttk.Label(page,textvariable=self.compare_status,wraplength=1200,padding=6).pack(side="bottom",fill="x")
-        self.compare_tree=ttk.Treeview(page,columns=("metric","before","after","change"),show="headings",height=5)
+        compare_table=ttk.Frame(page)
+        compare_table.pack(fill="x")
+        self.compare_tree=ttk.Treeview(compare_table,columns=("metric","before","after","change"),show="headings",height=5)
         for key,title in [("metric","指标（目标路线长度）"),("before","原方案"),("after","优化方案"),("change","优化减原方案")]:
             self.compare_tree.heading(key,text=title); self.compare_tree.column(key,width=180)
-        self.compare_tree.pack(fill="x")
+        # Keep all metrics reachable without pushing controls off small windows.
+        scrollbar=ttk.Scrollbar(compare_table,command=self.compare_tree.yview)
+        self.compare_tree.configure(yscrollcommand=scrollbar.set,height=2)
+        scrollbar.pack(side="right",fill="y")
+        self.compare_tree.pack(fill="x",expand=True)
+        page.bind("<Configure>",lambda e:self.compare_tree.configure(height=4 if e.height>500 else 2),add="+")
         self.canvas(page,"compare").pack(fill="both",expand=True)
 
     def _analysis(self) -> None:
@@ -190,6 +198,7 @@ class WorkbenchPages:
         self.app.schedule_render()
 
     def load_case(self,problem: bool) -> None:
+        if not self.app.ensure_editors_idle(): return
         if self.app.busy: return
         try:
             if self.backup is None:
@@ -202,6 +211,7 @@ class WorkbenchPages:
             messagebox.showerror("案例加载失败",f"无法保留当前输入：{exc}",parent=self.app.root)
 
     def restore_project(self) -> None:
+        if not self.app.ensure_editors_idle(): return
         if self.backup is None or self.app.busy: return
         saved=self.backup; self.backup=None
         self.app.load(saved["project"]); self.app.file=saved["file"]; self.app.dirty=saved["dirty"]
@@ -215,6 +225,7 @@ class WorkbenchPages:
         d=self.focus
         self.app.pause()
         if d.route_index is not None: self.app.frame.set(d.route_index)
+        self.app.show_figure_angle(d.angle_deg)
         self.issue_detail.configure(state="normal"); self.issue_detail.delete("1.0","end")
         self.issue_detail.insert("1.0",f"{d.name}｜实际：{d.actual}｜限制：{d.limit}\n{d.scope}；凸轮角：{d.angle_deg}°；场地位置：{d.point}\n依据：{d.basis}\n建议：{d.advice}（修改后须重新检查，不保证通过。）")
         self.issue_detail.configure(state="disabled")
@@ -236,6 +247,7 @@ class WorkbenchPages:
         self.render_compare()
 
     def adopt(self,optimized: bool) -> None:
+        if not self.app.ensure_editors_idle(): return
         if self.comparison is None or self.app.busy: return
         result=copy.deepcopy(self.comparison.optimized if optimized else self.comparison.original)
         self.adopting=True
@@ -271,6 +283,8 @@ class WorkbenchPages:
         for x,y,radius in r.obstacles: plot.circle(x,y,radius,"#df9546","#fff0dc")
         for path,color in paths: plot.line(np.asarray(path,dtype=float).reshape((-1,2)),color,2)
         for i,(x,y) in enumerate(r.waypoints,1): plot.circle(x,y,r.tolerance,"#a9bdd6"); plot.label(x,y,str(i))
+        for i,(_,x,y) in enumerate(r.auxiliary_points,1):
+            plot.circle(x,y,5/plot.sx,"#9a4fb0"); plot.label(x,y,f"辅{i}","#9a4fb0")
         canvas.create_text(10,8,anchor="nw",text=title,width=max(160,canvas.winfo_width()-20),fill="#25334c")
         return plot
 
@@ -317,6 +331,21 @@ class WorkbenchPages:
             i=int(np.argmin(abs(np.degrees(result.cam_angle)-d.angle_deg)))
             x,y=result.profile[i]
             camplot.circle(float(x),float(y),4/camplot.sx,"#cc354a","#cc354a")
+            k=i % len(result.geometry.get("gaps",[0]))
+            if result.geometry:
+                center=result.pitch[k]
+                nearest=result.geometry["nearest"][k]
+                segment=int(result.geometry["segments"][k])
+                if d.name in ("全局接触干涉","局部过切","压力角"):
+                    radius=max(result.project.mechanism.roller*5,5.)
+                    camplot=Plot(self.canvases["issue_cam"],[center[0]-radius,center[0]+radius,center[1]-radius,center[1]+radius])
+                    camplot.line(result.profile,"#2464df",1)
+                camplot.circle(float(center[0]),float(center[1]),result.project.mechanism.roller,"#159c8c")
+                camplot.line(np.array([center,nearest]),"#d77e39",2)
+                camplot.line(result.profile[segment:segment+2],"#cc354a",5)
+                camplot.circle(float(nearest[0]),float(nearest[1]),3/camplot.sx,"#cc354a","#cc354a")
+                self.canvases["issue_cam"].create_text(10,30,anchor="nw",width=max(160,self.canvases["issue_cam"].winfo_width()-20),
+                    text=f"滚子/球半径 {result.project.mechanism.roller:g} mm\n间隙 {result.geometry['gaps'][k]:.5f} mm · 最近轮廓段 {segment+1}\n绿圆：接触件；红粗线：最近/侵入段",fill="#9d421c",tags="contact_evidence")
         c=self.canvases["issue_curve"]
         kind=d.curve_kind if d else "steer"
         if kind=="pressure" and len(result.pressure): x,y,label=np.degrees(result.cam_angle),result.pressure,"整圈压力角 °"
@@ -336,7 +365,7 @@ class WorkbenchPages:
         if self.comparison:
             before=np.empty((0,2)) if self.comparison.original is None else self.comparison.original.path
             title="原方案无法计算，无原路线叠加；红：候选；原输入已保留，无法判断改善" if self.comparison.original is None else "灰：保留的原方案；红：优化候选；请按实际指标自行选择"
-            self.overlay(self.canvases["compare"],[(before,"#8293a7"),(self.comparison.optimized.path,"#cc354a")],title,self.comparison.original_project)
+            self.overlay(self.canvases["compare"],[(before,"#8293a7"),(self.comparison.optimized.path,"#cc354a")],title,self.comparison.optimized.project)
 
     def render(self,index: int) -> None:
         selected=self.app.views.select()

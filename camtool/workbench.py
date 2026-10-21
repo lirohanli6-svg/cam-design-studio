@@ -14,6 +14,7 @@ from typing import Any, Callable
 import numpy as np
 
 from .engine import Array, Result
+from .route_metrics import ordered_deviations
 from .project import Mechanism, Project, ProjectError, Vehicle
 from .version import VERSION
 
@@ -42,28 +43,6 @@ def cam_degrees(result: Result) -> Array:
     return result.drive_s/(math.pi*result.project.vehicle.drive_diameter*result.project.cam.ratio)*360
 
 
-def ordered_deviations(path: Array, targets: list[list[float]], tolerance: float) -> list[dict[str, Any]]:
-    if len(path) < 2:
-        raise ProjectError("轨迹至少需要两个采样点。")
-    edges = np.diff(path, axis=0)
-    lengths2 = np.sum(edges*edges, axis=1)
-    cursor = 0.
-    rows = []
-    for number, point in enumerate(targets, 1):
-        t = np.clip(np.sum((np.asarray(point)-path[:-1])*edges, axis=1)/np.maximum(lengths2,1e-20), 0, 1)
-        segment = min(int(cursor), len(t)-1)
-        t[segment] = max(t[segment], cursor-segment)
-        positions = np.arange(len(t))+t
-        distances = np.linalg.norm(path[:-1]+t[:,None]*edges-point, axis=1)
-        distances[positions < cursor-1e-9] = np.inf
-        index = int(np.argmin(distances))
-        error = float(distances[index])
-        if math.isfinite(error):
-            cursor = float(positions[index])
-        rows.append(dict(number=number, target=point, error_mm=error if math.isfinite(error) else None,
-                         position=cursor, point=(path[index]+t[index]*edges[index]).tolist(),
-                         passed=error <= tolerance))
-    return rows
 
 
 def checkpoint_progress(result: Result, index: int) -> tuple[int, int, float]:
@@ -124,16 +103,12 @@ def diagnostics(result: Result) -> list[Diagnostic]:
             d.actual, d.limit = f"{stroke[cam_index]:.4f} mm", f"{m.min_stroke:g}～{m.max_stroke:g} mm"
             d.advice = "根据整圈位移与实测滑块/摆臂可用行程的差值，核对中位、臂长和限位；不得把尚未实测的行程扩大后当作通过。"
         elif check.name == "顺序打卡":
-            cursor = 0
-            errors = []
-            for point in p.route.waypoints:
-                distance = np.linalg.norm(result.path[cursor:]-point, axis=1)
-                i = cursor+int(np.argmin(distance))
-                errors.append((float(np.min(distance)),i))
-                cursor = i
-            error, route_index = max(errors)
-            d.actual, d.limit = f"{error:.4f} mm（最近采样点）", f"≤ {p.route.tolerance:g} mm"
-            d.advice = "定位到顺序约束下偏差最大的打卡点附近。核对打卡顺序、坐标原点和传感器安装值，必要时增加过渡点并提高采样精度。"
+            visits=ordered_deviations(result.path,p.route.waypoints,p.route.tolerance)
+            worst_visit=max(visits,key=lambda row:row["error_mm"] if row["error_mm"] is not None else math.inf)
+            route_index=min(len(result.path)-1,int(round(worst_visit["position"])))
+            d.point=worst_visit["point"]
+            d.actual,d.limit=f"点{worst_visit['number']}：{worst_visit['error_mm']:.4f} mm（轨迹线段）",f"≤ {p.route.tolerance:g} mm"
+            d.advice="必过点按原顺序核查，名义回算不等于设计插值。查看采样检查是否已达上限、是否仍漏点；保持比赛容差和硬件限值，调整过渡路线后重算，并检验最终DXF。"
         elif check.name == "名义转向正向回算" and len(result.target_path)==len(result.path):
             replay_errors = np.linalg.norm(result.path-result.target_path,axis=1)
             route_index = int(np.argmax(replay_errors))
@@ -187,17 +162,15 @@ def diagnostics(result: Result) -> list[Diagnostic]:
             d.actual,d.limit=f"最小凸曲率半径 {rho:.4f} mm",f"> {m.roller*1.01:g} mm"
             d.advice="此处离散理论轮廓曲率最紧。可尝试增加凸轮尺度、减缓轮廓变化或核对滚子半径；调整后应提高采样密度并重新检验最终轮廓。"
         elif check.name == "全局接触干涉" and len(result.pitch)>1:
-            outline=result.profile[:-1]
-            edges=np.roll(outline,-1,axis=0)-outline
-            length2=np.sum(edges*edges,axis=1)
-            minimum=math.inf
-            for i,center in enumerate(result.pitch[:-1]):
-                t=np.clip(np.sum((center-outline)*edges,axis=1)/np.maximum(length2,1e-20),0,1)
-                closest_distance=float(np.linalg.norm(center-outline-t[:,None]*edges,axis=1).min())
-                if closest_distance<minimum: minimum,cam_index=closest_distance,i
-            threshold=m.roller-max(.02,m.roller*.01)
-            d.actual,d.limit=f"中心到全轮廓最短距离 {minimum:.4f} mm",f"≥ {threshold:g} mm（离散容差）"
-            d.advice="定位到滚子/球中心与整条轮廓最小间距的采样角。核对轮廓凹陷、接触半径及机构偏置，可改尺度或转向过渡后重算；不是连续干涉的严格证明。"
+            cam_index=int(result.geometry["index"])
+            minimum=float(result.geometry["minimum"])
+            d.actual,d.limit=f"中心到全轮廓间隙 {minimum:.5f} mm",f"≥ {-max(.02,m.roller*.01):g} mm（离散容差）"
+            d.advice="负间隙表示其他轮廓侵入滚子/球。红色为最近轮廓段和最近点。先尝试在对应比赛段搜索辅助控制；回程问题请单独调整回程空间/规划。若需改滚子、基圆或机构尺寸，属于实物改造建议，须按实物重新建模并复核；不保证通过。"
+        elif check.name == "转向变化速度":
+            rates=np.abs(np.gradient(np.degrees(result.delta),result.rear_s/v.speed))
+            route_index=int(np.argmax(rates))
+            d.actual,d.limit=f"{rates[route_index]:.4f}°/s",f"≤ {p.route.steer_rate_limit:g}°/s"
+            d.advice="调整该比赛段的辅助控制或必过点之间的过渡空间后复算；不应随意放宽规划限值。执行器速度、弹簧与打滑仍未验证。"
         elif check.name == "机构可逆传动" and len(result.cam_delta):
             grid=np.linspace(min(float(result.cam_delta.min()),math.radians(m.steer_zero))-1e-5,
                              max(float(result.cam_delta.max()),math.radians(m.steer_zero))+1e-5,401)
@@ -235,11 +208,12 @@ def _wheel_tracks(result: Result) -> list[Array]:
 
 
 def comparison_metrics(result: Result | None) -> dict[str, float | None]:
-    if result is None:
-        return dict.fromkeys(("路线长度 mm","最大前轮角 °","最大压力角 °","最大打卡偏差 mm","不满足项数量"))
-    return {"路线长度 mm":result.stats["sensor_distance"], "最大前轮角 °":result.stats["max_steer"],
-            "最大压力角 °":result.stats.get("max_pressure"), "最大打卡偏差 mm":result.stats["checkpoint_error"],
-            "不满足项数量":float(sum(c.status=="fail" for c in result.checks))}
+    names=("路线长度 mm","最大前轮角 °","最大压力角 °","最大打卡偏差 mm","不满足项数量",
+           "过切余量 mm（越大越好）","最小接触间隙 mm（越大越好）","转向变化速度 °/s")
+    if result is None: return dict.fromkeys(names)
+    s=result.stats
+    return dict(zip(names,[s["sensor_distance"],s["max_steer"],s.get("max_pressure"),s["checkpoint_error"],
+                          float(sum(c.status=="fail" for c in result.checks)),s.get("undercut_margin"),s.get("min_contact_gap"),s.get("max_steer_rate")]))
 
 
 @dataclass
@@ -262,13 +236,13 @@ class PlanComparison:
         changes=[]
         for key,before in a.items():
             after=b[key]
-            if before is not None and after is not None: changes.append(after-before)
+            if before is not None and after is not None: changes.append((before-after) if "越大越好" in key else after-before)
         better,worse = any(x < -1e-7 for x in changes),any(x > 1e-7 for x in changes)
         if better and not worse:
             return "表中指标有改善且无增大项；仍须逐项检查与实车核对。"
         if better and worse:
             return "指标存在取舍，未形成整体改善；请比较每项实际数值后选择。"
-        return "表中五项指标未改善（无变化或变差）；未自动替换原方案。"
+        return "表中指标未改善（无变化或变差）；未自动替换原方案。"
 
     def export(self, folder: Path) -> None:
         folder=Path(folder)

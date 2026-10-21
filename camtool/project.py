@@ -73,6 +73,10 @@ class Route:
     tension: float = 0.75
     step: float = 5.0
     tangent_offsets: list[float] = data_field(default_factory=list)
+    # [effective segment index (zero based), X, Y]; soft shape guides, never visits.
+    auxiliary_points: list[list[float]] = data_field(default_factory=list)
+    steer_rate_limit: float = 120.0
+    start_steer: float = 0.0
 
 
 @dataclass
@@ -132,12 +136,12 @@ class Project:
         if self.cam.direction not in (-1, 1) or self.mechanism.branch not in (-1, 1):
             raise ProjectError("项目中的旋向或连杆分支不支持。")
         r = self.route
-        for key in ("start_x", "start_y", "tolerance", "tension", "step"):
+        for key in ("start_x", "start_y", "tolerance", "tension", "step", "steer_rate_limit", "start_steer"):
             if not number(getattr(r, key)):
                 raise ProjectError(f"路线字段 {key} 格式错误。")
         if r.heading is not None and not number(r.heading):
             raise ProjectError("项目中的起跑方向格式错误。")
-        for values, width in [(r.waypoints, 2), (r.obstacles, 3)]:
+        for values, width in [(r.waypoints, 2), (r.obstacles, 3), (r.auxiliary_points, 3)]:
             if not isinstance(values, list) or any(not isinstance(row, list) or len(row) != width
                  or not all(number(x) for x in row) for row in values):
                 raise ProjectError("项目中的打卡点或障碍物行格式错误。")

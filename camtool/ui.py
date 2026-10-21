@@ -18,12 +18,15 @@ import numpy as np
 from . import plotting
 from .engine import Result, calculate, optimize
 from .export import export_design, report_text
-from .project import Project, ProjectError, read_waypoints
+from .project import Project, ProjectError
 from .version import APP_NAME, VERSION, changelog_text
 from .verification_ui import VerificationPage
-from .workbench import RouteHistory, apply_parameter_profile, index_at_time, parameter_profile, time_axis
+from .workbench import apply_parameter_profile, index_at_time, parameter_profile, time_axis
+from .waypoints import WaypointEditor, PointTableEditor
 from .workbench_ui import WorkbenchPages, prepare_views
 from .dimensions import draw_dimensions
+from .auxiliary_ui import AuxiliaryControls
+from .plot_views import FigurePanel,RetainedCanvas
 
 
 def prepare_display() -> None:
@@ -63,12 +66,24 @@ class App:
         self.play_generation = 0
         self.play_clock = 0.0
         self.play_start = 0.0
-        self.route_history = RouteHistory()
         self.scene_plot: plotting.Plot | None = None
         self.drag_plot: plotting.Plot | None = None
         self.drag_index: int | None = None
         self.drag_snapshot: dict[str, Any] | None = None
+        self.drag_editor: PointTableEditor | None = None
         self.map_edit = tk.BooleanVar(value=True)
+        self.view_mode=tk.StringVar(value='编辑点位模式')
+        self.detail_angle: float | None=None
+        self.figure_panels: dict[str,FigurePanel]={}
+        self.figure_windows: dict[str,tuple[tk.Toplevel,FigurePanel]]={}
+        self.drag_canvas: tk.Canvas | None=None
+        self.drag_pending: tuple[float,float] | None=None
+        self.drag_timer: str | None=None
+        self.drag_invalidated=False
+        self.drag_motions=0;self.drag_flushes=0
+        self.drag_frame_ms: list[float]=[]
+        self.map_mode = tk.StringVar(value="打卡点")
+        self.map_hint = tk.StringVar()
         self.dimension_canvases: dict[str, tk.Canvas] = {}
         self.active_parameter = "vehicle.wheelbase"
         self.parameter_source = tk.StringVar(value="设计项目继承，尚未独立实测")
@@ -81,6 +96,7 @@ class App:
         self.is_demo = tk.BooleanVar(value=True)
         self.status = tk.StringVar(value="演示参数仅供学习。填写实车尺寸后，点击计算。")
         self.frame = tk.IntVar(value=0)
+        self.frame.trace_add('write',self.frame_changed)
         root.title(f"{APP_NAME} {VERSION}")
         width, height = min(1360, root.winfo_screenwidth()-100), min(780, root.winfo_screenheight()-140)
         root.geometry(f"{width}x{height}+20+20")
@@ -92,6 +108,7 @@ class App:
         style.configure("TFrame", background="#edf2f8")
         style.configure("TLabel", background="#edf2f8", foreground="#25334c")
         style.configure("TButton", padding=(8, 5), width=7)
+        style.configure("Compact.TButton", padding=(5,2), font=("Microsoft YaHei UI",9))
         style.configure("Accent.TButton", background="#2464df", foreground="white")
         style.configure("TNotebook.Tab", padding=(12, 7))
         style.layout("Content.TNotebook.Tab", [])
@@ -108,11 +125,11 @@ class App:
         self.root.after(80, self.poll)
 
     def _build(self) -> None:
-        heading = tk.Frame(self.root, bg="#172740", padx=18, pady=10)
+        heading = tk.Frame(self.root, bg="#172740", padx=18, pady=3)
         heading.pack(fill="x")
         tk.Label(heading, text="凸轮设计工作台", bg="#172740", fg="white", font=("Microsoft YaHei UI", 17, "bold")).pack(side="left")
         tk.Label(heading, text="路线 → 车辆 → 转向机构 → 凸轮", bg="#172740", fg="#a7bddc").pack(side="right")
-        toolbar = ttk.Frame(self.root, padding=(12, 8))
+        toolbar = ttk.Frame(self.root, padding=(12, 3))
         toolbar.pack(fill="x")
         actions: list[tuple[str, Callable[[], Any]]] = [("新建", self.new), ("演示项目", self.demo), ("打开", self.open),
                                                        ("保存", self.save), ("另存为", lambda: self.save(True))]
@@ -126,7 +143,7 @@ class App:
         ttk.Button(toolbar, text="二次检验", command=lambda: self.views.select(self.verification_frame)).pack(side="left", padx=3)
         self.export_button = ttk.Button(toolbar, text="导出结果", command=self.export, state="disabled")
         self.export_button.pack(side="right", padx=3)
-        details = ttk.Frame(self.root, padding=(16, 0, 16, 8))
+        details = ttk.Frame(self.root, padding=(16, 0, 16, 4))
         details.pack(fill="x")
         ttk.Label(details, text="项目名称").pack(side="left")
         ttk.Entry(details, textvariable=self.name, width=35).pack(side="left", padx=8)
@@ -144,12 +161,24 @@ class App:
         self._waypoint_page()
         self._parameter_pages()
         self.canvases: dict[str, tk.Canvas] = {}
+        canvas: tk.Canvas
         for key, title in [("scene", "场地与试跑"), ("cam", "凸轮轮廓"), ("mechanism", "机构运动")]:
             page = ttk.Frame(self.views)
             self.views.add(page, text=title)
-            canvas = tk.Canvas(page, bg="white", highlightthickness=0)
-            canvas.pack(fill="both", expand=True)
-            canvas.bind("<Configure>", lambda _e: self.schedule_render())
+            if key=="scene":
+                mode=ttk.Frame(page,padding=3);mode.pack(fill="x")
+                ttk.Label(mode,text="点位类型").pack(side="left")
+                selector=ttk.Combobox(mode,textvariable=self.map_mode,values=("打卡点","辅助点"),state="readonly",width=7)
+                selector.pack(side="left",padx=4)
+                selector.bind("<<ComboboxSelected>>",self.choose_map_mode)
+                ttk.Label(mode,textvariable=self.map_hint,wraplength=450,font=("Microsoft YaHei UI",8)).pack(side="left",fill="x",expand=True)
+            if key in ('scene','cam'):
+                panel=FigurePanel(page,self,key);panel.pack(fill='both',expand=True)
+                self.figure_panels[key]=panel;canvas=panel.canvas
+            else:
+                canvas = tk.Canvas(page, bg="white", highlightthickness=0)
+                canvas.pack(fill="both", expand=True)
+                canvas.bind("<Configure>", lambda _e: self.schedule_render())
             self.canvases[key] = canvas
         curve_page = ttk.Frame(self.views)
         self.views.add(curve_page, text="计算曲线")
@@ -160,7 +189,23 @@ class App:
             self.canvases[key] = canvas
         report_page = ttk.Frame(self.views)
         self.views.add(report_page, text="检查报告")
-        self.report = tk.Text(report_page, wrap="word", bg="white", fg="#25334c", padx=18, pady=16,
+        self.report_tabs=ttk.Notebook(report_page)
+        self.report_tabs.pack(fill="both",expand=True)
+        summary_page=ttk.Frame(self.report_tabs)
+        points_page=ttk.Frame(self.report_tabs)
+        self.report_tabs.add(summary_page,text="总体检查报告")
+        self.report_tabs.add(points_page,text="逐点打卡偏差")
+        self.checkpoint_status=tk.StringVar(value="尚未计算。")
+        ttk.Label(points_page,textvariable=self.checkpoint_status,wraplength=470,padding=6).pack(fill="x")
+        self.checkpoint_tree=ttk.Treeview(points_page,columns=("number","target","error","limit","state"),show="headings",selectmode="browse")
+        for key,title,width in [("number","点号",45),("target","必过点 X,Y mm",135),("error","名义偏差 mm",100),("limit","容差 mm",75),("state","状态",70)]:
+            self.checkpoint_tree.heading(key,text=title);self.checkpoint_tree.column(key,width=width,minwidth=35)
+        bar=ttk.Scrollbar(points_page,command=self.checkpoint_tree.yview)
+        self.checkpoint_tree.configure(yscrollcommand=bar.set)
+        bar.pack(side="right",fill="y");self.checkpoint_tree.pack(fill="both",expand=True)
+        self.checkpoint_tree.tag_configure("fail",foreground="#b3263d")
+        self.checkpoint_tree.bind("<<TreeviewSelect>>",self.locate_checkpoint)
+        self.report = tk.Text(summary_page, wrap="word", bg="white", fg="#25334c", padx=18, pady=16,
                               relief="flat", font=("Microsoft YaHei UI", 10))
         self.report.pack(fill="both", expand=True)
         self.report.configure(state="disabled")
@@ -174,11 +219,16 @@ class App:
         self.views.add(self.verification_frame, text="二次检验")
         self.verifier = VerificationPage(self.verification_frame, self.verification_context)
         self.workbench = WorkbenchPages(self)
+        self.auxiliary = AuxiliaryControls(self, self.workbench.frames["compare"])
+        self.inputs.bind("<<NotebookTabChanged>>",self.point_page_changed)
+        self.map_edit.trace_add("write",self.map_mode_changed)
+        self.auxiliary.editor.new_segment.trace_add("write",lambda *args:self.update_map_hint())
+        self.update_map_hint()
         for tab in self.views.tabs():
             self.navigation.add(ttk.Frame(self.navigation, height=1), text=self.views.tab(tab,"text"))
         content_views.on_select=self.navigation.select
         self.navigation.bind("<<NotebookTabChanged>>", self.navigate_view)
-        playback = ttk.Frame(self.root, padding=(16, 8))
+        playback = ttk.Frame(self.root, padding=(16, 2))
         playback.pack(side="bottom", fill="x", before=pane)
         ttk.Button(playback, text="播放 / 暂停", command=self.play).pack(side="left")
         self.slider = ttk.Scale(playback, from_=0, to=1, variable=self.frame, command=lambda _value: self.schedule_render())
@@ -186,7 +236,7 @@ class App:
         self.slider.bind("<ButtonPress-1>",lambda event:self.pause())
         self.progress_label = ttk.Label(playback, text="等待计算", width=30)
         self.progress_label.pack(side="right")
-        self.status_label = ttk.Label(self.root, textvariable=self.status, padding=(16, 8), foreground="#546784")
+        self.status_label = ttk.Label(self.root, textvariable=self.status, padding=(16, 2), foreground="#546784")
         self.status_label.pack(side="bottom", fill="x", before=playback)
         def tab_changed(_event: Any) -> None:
             selected = self.views.select()
@@ -208,11 +258,9 @@ class App:
                     self.status_label.pack(side="bottom", fill="x", before=playback)
             self.schedule_render()
         self.views.bind("<<NotebookTabChanged>>", tab_changed)
-        scene=self.canvases["scene"]
-        scene.bind("<ButtonPress-1>",self.map_press)
-        scene.bind("<B1-Motion>",self.map_drag)
-        scene.bind("<ButtonRelease-1>",self.map_release)
+        self.root.bind_all('<ButtonRelease-1>',self.outside_release,add='+')
         for canvas in self.canvases.values():
+            if isinstance(canvas,RetainedCanvas):continue
             canvas.create_text(30, 40, text="填写左侧参数后，点击「计算设计」。", fill="#718096", anchor="nw")
 
     def verification_context(self) -> tuple[Project, Any, Any, float]:
@@ -269,6 +317,7 @@ class App:
             messagebox.showerror("参数配置",str(exc),parent=self.root)
 
     def load_parameters(self) -> None:
+        if not self.ensure_editors_idle(): return
         path=filedialog.askopenfilename(parent=self.root,filetypes=[("参数配置","*.json")])
         if path:
             try:
@@ -282,83 +331,194 @@ class App:
                 messagebox.showerror("参数配置",str(exc),parent=self.root)
 
     def route_snapshot(self) -> dict[str,Any]:
-        return {"points":[[float(v) for v in self.tree.item(item,"values")] for item in self.tree.get_children()],
-                "tangents":copy.deepcopy(self.project.route.tangent_offsets)}
-
-    def restore_route_snapshot(self,snapshot: dict[str,Any]) -> None:
-        self.populate_points(snapshot["points"])
-        self.project.route.tangent_offsets=copy.deepcopy(snapshot["tangents"])
-        self.changed()
+        return self.waypoints.snapshot()
 
     def undo_route(self) -> None:
-        snapshot=self.route_history.undo(self.route_snapshot())
-        if snapshot is not None: self.restore_route_snapshot(snapshot)
+        self.waypoints.undo()
 
     def redo_route(self) -> None:
-        snapshot=self.route_history.redo(self.route_snapshot())
-        if snapshot is not None: self.restore_route_snapshot(snapshot)
+        self.waypoints.undo(True)
 
     def undo_key(self,event: Any) -> str | None:
         if isinstance(event.widget,(tk.Text,tk.Entry,ttk.Entry,ttk.Combobox)): return None
-        self.undo_route(); return "break"
+        editor=self.keyboard_editor(event.widget)
+        if editor is not None: editor.undo(); return "break"
+        return None
 
     def redo_key(self,event: Any) -> str | None:
         if isinstance(event.widget,(tk.Text,tk.Entry,ttk.Entry,ttk.Combobox)): return None
-        self.redo_route(); return "break"
+        editor=self.keyboard_editor(event.widget)
+        if editor is not None: editor.undo(True); return "break"
+        return None
+
+    def keyboard_editor(self,widget: Any) -> PointTableEditor | None:
+        panel=self.figure_for(widget)
+        if panel is not None and panel.kind=='scene':return self.map_editor()
+        selected=self.inputs.select()
+        for editor in (self.waypoints,self.auxiliary.editor):
+            if selected==str(editor):return editor
+        return None
+
+    def ensure_editors_idle(self) -> bool:
+        """Global project operations require explicit resolution of both drafts."""
+        if self.drag_canvas is not None:self.finish_map_gesture()
+        for editor in (self.waypoints,self.auxiliary.editor):
+            if editor.draft is not None and editor._pending():
+                self.views.select(0);self.inputs.select(editor)
+                editor.ensure_idle();return False
+        return all(editor.ensure_idle() for editor in (self.waypoints,self.auxiliary.editor))
+
+    def map_editor(self) -> PointTableEditor:
+        return self.auxiliary.editor if self.map_mode.get()=="辅助点" else self.waypoints
+
+    def frame_changed(self,*args: Any) -> None:
+        self.detail_angle=None
+        if hasattr(self,'workbench'):self.schedule_render()
+
+    def map_mode_changed(self,*args: Any) -> None:
+        self.finish_map_gesture()
+        self.view_mode.set('编辑点位模式' if self.map_edit.get() else '浏览模式')
+        self.update_map_hint()
+
+    def open_figure(self,kind: str) -> None:
+        if kind in self.figure_windows:
+            window,panel=self.figure_windows[kind];window.deiconify();window.lift();panel.draw();return
+        window=tk.Toplevel(self.root);window.title(('场地路线图' if kind=='scene' else '凸轮轮廓图')+' · 放大查看')
+        window.geometry('1040x740+40+40');window.minsize(640,480)
+        panel=FigurePanel(window,self,kind,True);panel.pack(fill='both',expand=True)
+        self.figure_windows[kind]=(window,panel)
+        def close() -> None:
+            if self.drag_canvas==panel.canvas:self.finish_map_gesture()
+            self.figure_windows.pop(kind,None);window.destroy()
+        window.protocol('WM_DELETE_WINDOW',close);window.bind('<Control-z>',self.undo_key);window.bind('<Control-y>',self.redo_key);window.after_idle(panel.draw)
+
+    def figure_for(self,canvas: Any) -> FigurePanel | None:
+        return next((panel for panel in [*self.figure_panels.values(),*[p for _,p in self.figure_windows.values()]] if panel.canvas==canvas),None)
+
+    def show_figure_angle(self,angle: float | None) -> None:
+        self.detail_angle=angle;self.schedule_render()
+
+    def focus_problem(self) -> None:
+        d=self.workbench.focus;r=self.result
+        if d is None or r is None:return
+        self.show_figure_angle(d.angle_deg)
+        for panel in [*self.figure_panels.values(),*[p for _,p in self.figure_windows.values()]]:
+            if panel.camera.home is None:
+                if panel.kind=='scene':
+                    a,b,c,e=r.project.route.field;bounds=(a-100,b+100,c-100,e+100)
+                else:
+                    radius=r.stats['max_profile_radius']*1.4;bounds=(-radius,radius,-radius,radius)
+                panel.camera.prepare(bounds,panel.canvas.winfo_width(),panel.canvas.winfo_height())
+            if panel.kind=='scene' and d.point is not None:
+                panel.camera.focus(d.point[0],d.point[1],max(100,r.project.route.tolerance*5))
+            elif panel.kind=='cam' and d.angle_deg is not None:
+                i=int(np.argmin(abs(np.degrees(r.cam_angle)-d.angle_deg)))
+                panel.camera.focus(float(r.pitch[i,0]),float(r.pitch[i,1]),max(5,r.project.mechanism.roller*5))
+            panel.draw()
+        self.views.select(0 if d.point is not None else 1)
+
+    def point_page_changed(self,event: Any=None) -> None:
+        selected=self.inputs.select()
+        mode="辅助点" if selected==str(self.auxiliary.editor) else "打卡点" if selected==str(self.waypoints) else None
+        if mode is not None:
+            self.finish_map_gesture()
+            self.map_mode.set(mode)
+        self.update_map_hint();self.schedule_render()
+
+    def choose_map_mode(self,event: Any=None) -> None:
+        self.finish_map_gesture()
+        self.inputs.select(self.map_editor())
+        self.update_map_hint();self.schedule_render()
+
+    def update_map_hint(self) -> None:
+        mode=self.map_mode.get()
+        action=f"区间 {self.auxiliary.editor.new_segment.get()} · " if mode=="辅助点" else "按比赛顺序 · "
+        self.map_hint.set((action+"空白添加，拖动所选；蓝圆=打卡，紫菱=辅助") if self.map_edit.get() else "地图编辑已关闭（在当前点页勾选开启）")
 
     def draw_route_editor(self) -> None:
-        try:
-            p=self.collect()
-            bounds=p.route.field
-            if not all(math.isfinite(x) for x in bounds) or bounds[0]>=bounds[1] or bounds[2]>=bounds[3]:
-                raise ProjectError("场地边界无效。")
-            selection=self.tree.selection()
-            selected=int(selection[0]) if selection else None
-            fixed=None if self.drag_plot is None else (self.drag_plot.xmin,self.drag_plot.xmax,self.drag_plot.ymin,self.drag_plot.ymax)
-            self.scene_plot=plotting.route_edit(self.canvases["scene"],p,selected,fixed)
-        except (ProjectError,ValueError):
-            self.scene_plot=None
-            c=self.canvases["scene"]; c.delete("all"); c.create_text(20,25,text="请先填写有效参数与场地边界，再编辑路线。",anchor="nw")
+        panel=self.figure_panels['scene'];panel.draw();self.scene_plot=panel.plot
 
     def map_press(self,event: Any) -> None:
-        if not self.map_edit.get() or self.scene_plot is None: return
-        self.pause()
-        self.drag_plot=self.scene_plot
-        self.drag_snapshot=self.route_snapshot()
-        self.drag_index=None
-        self.drag_origin=(event.x,event.y)
-        points=self.drag_snapshot["points"]
-        if points:
-            distance=[math.hypot(*(np.array(self.scene_plot.xy(*point))-[event.x,event.y])) for point in points]
-            nearest=int(np.argmin(distance))
+        editor=self.map_editor()
+        if not editor.ensure_idle() or not self.map_edit.get():return
+        panel=self.figure_for(getattr(event,'widget',self.canvases['scene'])) or self.figure_panels['scene']
+        if panel.plot is None:return
+        self.pause();self.drag_plot=panel.plot;self.drag_canvas=panel.canvas
+        self.drag_snapshot=editor.snapshot();self.drag_editor=editor;self.drag_index=None
+        self.drag_origin=(event.x,event.y);self.drag_pending=None;self.drag_invalidated=False
+        self.drag_frame_ms=[]
+        panel.canvas.focus_set()
+        points=self.drag_snapshot['points']
+        distance=[math.dist(self.drag_plot.xy(*point[:2]),(event.x,event.y)) for point in points]
+        if distance:
+            nearby=[i for i in editor.selected() if distance[i]<=12]
+            nearest=min(nearby,key=lambda i:distance[i]) if nearby else int(np.argmin(distance))
             if distance[nearest]<=12:
-                self.drag_index=nearest
-                self.tree.selection_set(str(nearest)); self.select_row(None)
+                self.drag_index=nearest;editor.tree.selection_set(str(nearest));editor.tree.focus(str(nearest));editor.refresh_selection()
+        other=self.waypoints if editor is self.auxiliary.editor else self.auxiliary.editor
+        if self.drag_index is None and any(math.dist(self.drag_plot.xy(*point[:2]),(event.x,event.y))<=12 for point in other.document.points):
+            editor.feedback.set('这是另一类点，请先切换地图编辑模式；本次未添加或修改。')
+            self.drag_plot=None;self.drag_snapshot=None;self.drag_editor=None;self.drag_canvas=None;return
+        if panel.canvas.winfo_viewable():panel.canvas.grab_set_global()
 
     def map_drag(self,event: Any) -> None:
-        if self.drag_plot is None or self.drag_index is None: return
-        points=self.route_snapshot()["points"]
-        x,y=self.drag_plot.unxy(event.x,event.y)
-        points[self.drag_index]=[round(x,3),round(y,3)]
-        self.populate_points(points)
-        self.project.route.tangent_offsets=[]
-        self.tree.selection_set(str(self.drag_index)); self.select_row(None)
-        self.changed()
+        if self.drag_plot is None or self.drag_index is None:return
+        self.drag_motions+=1;self.drag_pending=(event.x,event.y)
+        if self.drag_timer is None:self.drag_timer=self.root.after(16,self.flush_drag)
+
+    def flush_drag(self) -> None:
+        started=time.perf_counter()
+        if self.drag_timer is not None:self.root.after_cancel(self.drag_timer);self.drag_timer=None
+        if self.drag_pending is None or self.drag_plot is None or self.drag_editor is None or self.drag_index is None:return
+        px,py=self.drag_pending;self.drag_pending=None
+        editor=self.drag_editor;i=self.drag_index
+        # Returning to the exact press pixel restores original precision.
+        if math.dist((px,py),self.drag_origin)<.5:
+            point=self.drag_snapshot['points'][i][:2] if self.drag_snapshot is not None else editor.document.points[i][:2]
+        else:point=[round(v,3) for v in self.drag_plot.unxy(px,py)]
+        if editor is self.auxiliary.editor:
+            try:editor.cell_value(i,0,str(point[0]));editor.cell_value(i,1,str(point[1]))
+            except ProjectError as exc:editor.feedback.set(f'地图未移动：{exc}；未自动纠正。');return
+        if editor.document.points[i][:2]==point:return
+        editor.document.points[i][:2]=point
+        if editor is self.auxiliary.editor:self.project.route.auxiliary_points=self.auxiliary.editor.document.controls()
+        if not self.drag_invalidated:
+            self.drag_invalidated=True;self.changed()
+        editor.tree.item(str(i),values=tuple(editor.display_value(col,v) for col,v in enumerate(editor.document.points[i])))
+        self.drag_flushes+=1
+        self.render()
+        self.drag_frame_ms.append((time.perf_counter()-started)*1000)
 
     def map_release(self,event: Any) -> None:
-        if self.drag_plot is None or self.drag_snapshot is None: return
-        if self.drag_index is None and math.hypot(event.x-self.drag_origin[0],event.y-self.drag_origin[1])<5:
-            points=self.route_snapshot()["points"]
-            x,y=self.drag_plot.unxy(event.x,event.y)
-            bounds=self.collect().route.field
-            if bounds[0]<=x<=bounds[1] and bounds[2]<=y<=bounds[3] and len(points)<200:
+        if self.drag_plot is None or self.drag_snapshot is None or self.drag_editor is None:return
+        editor=self.drag_editor
+        if self.drag_index is not None:
+            if math.dist((event.x,event.y),self.drag_origin)>.5 or self.drag_invalidated:
+                self.drag_pending=(event.x,event.y);self.flush_drag()
+        elif math.dist((event.x,event.y),self.drag_origin)<5:
+            points=editor.snapshot()['points'];x,y=self.drag_plot.unxy(event.x,event.y);bounds=self.collect().route.field
+            if editor is self.auxiliary.editor:self.auxiliary.editor.map_add(round(x,3),round(y,3))
+            elif bounds[0]<=x<=bounds[1] and bounds[2]<=y<=bounds[3] and len(points)<200:
                 point=[round(x,3),round(y,3)]
-                if not points or np.linalg.norm(np.array(points[-1])-point)>.01:
-                    self.populate_points([*points,point]); self.project.route.tangent_offsets=[]
-                    self.tree.selection_set(str(len(points))); self.select_row(None)
-                    self.changed()
-        self.route_history.commit(self.drag_snapshot,self.route_snapshot())
-        self.drag_plot=None; self.drag_index=None; self.drag_snapshot=None
+                if not points or np.linalg.norm(np.array(points[-1])-point)>.01:editor.apply([*points,point],(len(points),),preview=True)
+        self.finish_map_gesture()
+
+    def outside_release(self,event: Any) -> None:
+        if self.drag_canvas is None:return
+        # Capture keeps releases outside both main/popout canvas in this gesture.
+        if getattr(event,'widget',None)==self.drag_canvas:return
+        from types import SimpleNamespace
+        self.map_release(SimpleNamespace(x=event.x_root-self.drag_canvas.winfo_rootx(),y=event.y_root-self.drag_canvas.winfo_rooty()))
+
+    def finish_map_gesture(self) -> None:
+        self.flush_drag()
+        if self.drag_editor is not None and self.drag_snapshot is not None:
+            editor=self.drag_editor
+            if editor is self.waypoints and editor.document.points!=self.drag_snapshot['points']:
+                editor.document.tangents=[];self.project.route.tangent_offsets=[]
+            editor.finish_gesture(self.drag_snapshot)
+        if self.drag_canvas is not None and self.drag_canvas.grab_current()==self.drag_canvas:self.drag_canvas.grab_release()
+        self.drag_plot=None;self.drag_index=None;self.drag_snapshot=None;self.drag_editor=None;self.drag_canvas=None;self.drag_pending=None
         self.schedule_render()
 
     def _scroll_page(self, title: str) -> ttk.Frame:
@@ -458,7 +618,7 @@ class App:
             ("thickness", "凸轮厚度 mm", "用于记录；DXF 为二维轮廓。"),
             ("ratio", "轮 → 凸轮减速比", "驱动轮转多少圈，凸轮转 1 圈。"),
             ("phase", "廓线起始相位 °", "几何相位；装车时须按标记对齐。"),
-            ("points", "整圈轮廓点数", "360～4000；增加点数后应重新核对曲率。"),
+            ("points", "整圈轮廓起始点数", "360～4000；漏点或回算误差过大时自动加密，实际点数见报告；达到上限仍不满足会报错。"),
             ("pressure_limit", "压力角上限 °", "属于用户设定的设计门槛。")]:
             self._field(page, f"cam.{key}", label, hint)
         self._field(page, "cam.direction", "凸轮旋向", choices={"逆时针 +1": 1, "顺时针 -1": -1})
@@ -471,8 +631,10 @@ class App:
             ("start_x", "传感器场地起点 X mm", "传感器起跑时在场地中的 X 坐标，与打卡点使用同一个原点；不是车上传感器的安装距离。"),
             ("start_y", "传感器场地起点 Y mm", "传感器起跑时在场地中的 Y 坐标。例：起点 (410,420)，上面填 410、这里填 420。"),
             ("heading", "车头方向角 °（可留空）", "直接输入角度：向右 0°、向上 90°、向左 180°、向下 -90°；留空时朝向表格第 2 个打卡点。"),
+            ("start_steer", "起跑前轮角 °", "用于确定起跑传感器切向；须与实车起跑前轮姿态一致，左正右负。不是机构中位角。"),
             ("tolerance", "统一打卡容差半径 mm", "传感器经过各打卡中心时允许的最大偏差；所有点共用，按比赛要求填写。"),
             ("tension", "路线张力 0.2～1.5", "控制打卡点之间曲线的形状；修改后重新计算并检查弯道，数值越大不一定越好。"),
+            ("steer_rate_limit", "转向变化速度上限 °/s", "理论恒速下的规划门槛；不代表已验证执行器动态能力。"),
             ("step", "路线采样步长 mm", "沿路线每隔多少毫米计算一次；数值越小，采样越密、计算量越大。")]:
             self._field(page, f"route.{key}", label, hint)
         ttk.Label(page, text="场地边界：填写场地坐标的左右、下上限。它限制可用空间，不会自动把弯道变宽。", foreground="#718096", wraplength=350).pack(fill="x", pady=(10, 0))
@@ -487,70 +649,22 @@ class App:
         for key, label in [("iterations", "搜索轮数 1～6"), ("smooth_weight", "转向平顺权重"),
                            ("length_weight", "路线长度权重"), ("pressure_weight", "压力角改善权重")]:
             self._field(page, f"optimization.{key}", label)
-        ttk.Label(page, text="先满足约束，再比较权重目标。\n本版搜索路线张力和局部切线，属于局部优化，不保证找到全局最优。计算过程中可停止。", wraplength=350, foreground="#718096").pack(fill="x", pady=12)
+        ttk.Label(page, text="先满足约束，再比较权重目标。\n本版搜索全路线张力和局部切线；自动辅助点搜索在「优化对比」页，属于局部优化，不保证找到全局最优。计算过程中可停止。", wraplength=350, foreground="#718096").pack(fill="x", pady=12)
 
     def _waypoint_page(self) -> None:
-        page = ttk.Frame(self.inputs, padding=6, width=420)
-        self.inputs.add(page, text="打卡点")
-        ttk.Label(page, text="按行序打卡；X/Y 与场地起点共用坐标。Ctrl 多选、Shift 连选，可批量删除。", wraplength=420).pack(fill="x", pady=4)
-        footer = ttk.Frame(page)
-        footer.pack(side="bottom", fill="x")
-        edit_controls=ttk.Frame(footer); edit_controls.pack(fill="x",pady=3)
-        self.point_selection_status=tk.StringVar(value="已选 0 / 0 个")
-        ttk.Label(edit_controls,textvariable=self.point_selection_status).pack(side="left",padx=(0,4))
-        edit_actions: list[tuple[str,Callable[[],Any]]] = [("全选",self.select_all_points),("取消",self.clear_point_selection),("撤销",self.undo_route),("重做",self.redo_route)]
-        for title,command in edit_actions:
-            ttk.Button(edit_controls,text=title,command=command,width=5).pack(side="left",padx=2)
-        table=ttk.Frame(page); table.pack(fill="both",expand=True)
-        self.tree = ttk.Treeview(table, columns=("x", "y"), show="tree headings", height=12, selectmode="extended")
-        for col, text, width in [("#0", "序号", 48), ("x", "X / mm", 140), ("y", "Y / mm", 140)]:
-            self.tree.heading(col, text=text)
-            self.tree.column(col, width=width, stretch=col != "#0")
-        bar=ttk.Scrollbar(table,command=self.tree.yview)
-        self.tree.configure(yscrollcommand=bar.set)
-        bar.pack(side="right",fill="y"); self.tree.pack(fill="both", expand=True)
-        self.tree.bind("<<TreeviewSelect>>", self.select_row)
-        self.tree.bind("<Control-a>",self.select_all_points)
-        self.tree.bind("<Control-A>",self.select_all_points)
-        self.tree.bind("<Delete>",self.delete_selected_points_key)
-        self.point_details=ttk.Frame(footer)
-        self.point_details_expanded=tk.BooleanVar(value=True)
-        self.point_compact=False
-        row = ttk.Frame(self.point_details)
-        row.pack(fill="x", pady=4)
-        self.point_x, self.point_y = tk.StringVar(), tk.StringVar()
-        ttk.Label(row, text="X").pack(side="left")
-        ttk.Entry(row, textvariable=self.point_x, width=13).pack(side="left", padx=5)
-        ttk.Label(row, text="Y").pack(side="left")
-        ttk.Entry(row, textvariable=self.point_y, width=13).pack(side="left", padx=5)
-        row = ttk.Frame(footer)
-        row.pack(fill="x", pady=3)
-        self.single_point_buttons: list[ttk.Button]=[]
-        for text, action in [("添加", lambda: self.edit_point(True)), ("更新所选", lambda: self.edit_point(False)),
-                             ("删除所选", self.delete_point), ("上移", lambda: self.move_point(-1)),
-                             ("下移", lambda: self.move_point(1))]:
-            button=ttk.Button(row, text=text, command=action, width=9 if text in ("更新所选","删除所选") else 5)
-            button.pack(side="left", padx=1)
-            if text in ("更新所选","上移","下移"): self.single_point_buttons.append(button)
-            elif text=="删除所选": self.delete_points_button=button
-        ttk.Checkbutton(footer,text="显示坐标编辑 / CSV",variable=self.point_details_expanded,command=self.toggle_point_details).pack(anchor="w",pady=2)
-        self.point_details.pack(fill="x")
-        row=ttk.Frame(self.point_details); row.pack(fill="x",pady=4)
-        ttk.Button(row, text="从 CSV 导入打卡点", command=self.import_csv,width=20).pack(side="left")
-        ttk.Checkbutton(row,text="地图编辑",variable=self.map_edit).pack(side="left",padx=8)
-        ttk.Label(self.point_details, text="全选也可用 Ctrl+A，Delete 删除所选。更新坐标/上下移每次选一行；CSV 两列 x,y。", foreground="#718096", wraplength=420).pack(fill="x", pady=3)
-        page.bind("<Configure>",self.resize_waypoint_page)
+        self.waypoints=WaypointEditor(self.inputs,self.waypoints_changed,self.waypoint_selected,self.map_edit)
+        self.inputs.add(self.waypoints,text="打卡点")
+        self.tree=self.waypoints.tree
 
-    def toggle_point_details(self) -> None:
-        if self.point_details_expanded.get(): self.point_details.pack(fill="x")
-        else: self.point_details.pack_forget()
+    def waypoints_changed(self) -> None:
+        self.project.route.tangent_offsets=self.waypoints.snapshot()["tangents"]
+        self.changed()
 
-    def resize_waypoint_page(self,event: Any) -> None:
-        compact=event.height<400
-        if compact!=self.point_compact:
-            self.point_compact=compact
-            self.point_details_expanded.set(not compact)
-            self.toggle_point_details()
+    def waypoint_selected(self) -> None:
+        if not self.loading and self.inputs.select()==str(self.waypoints) and (self.waypoints.selected() or self.waypoints.draft is not None):
+            self.pause()
+            self.views.select(0)
+        self.schedule_render()
 
     def changed(self, *_args: Any) -> None:
         if self.loading:
@@ -558,22 +672,27 @@ class App:
         self.dirty = True
         self.revision += 1
         self.result = None
+        self.progress_label.configure(text="输入已更改 · 等待重算")
         self.playing = False
         self.play_generation+=1
         self.cancel.set()
         self.workbench.invalidate()
+        self.checkpoint_tree.delete(*self.checkpoint_tree.get_children())
+        self.checkpoint_status.set("输入已更改或项目已载入，旧逐点结果失效，请重新计算。")
+        self.auxiliary.invalidate()
         self.scene_plot=None
         self.export_button.configure(state="disabled")
         self.status.set("参数已修改，预览结果已失效；请重新计算后导出。")
         self._mechanism_controls()
         for canvas in self.canvases.values():
+            if isinstance(canvas,RetainedCanvas):continue
             canvas.delete("all")
             canvas.create_text(30, 40, text="输入已更改，请重新计算以更新预览。", anchor="nw", fill="#718096")
         self.report.configure(state="normal")
         self.report.delete("1.0", "end")
         self.report.insert("1.0", "输入已更改，旧报告已失效。请重新计算。")
         self.report.configure(state="disabled")
-        self.draw_sketches()
+        if self.drag_plot is None:self.draw_sketches()
         self.schedule_render()
 
     def obstacle_changed(self, _event: Any) -> None:
@@ -582,12 +701,16 @@ class App:
             self.obstacles.edit_modified(False)
 
     def load(self, project: Project) -> None:
+        self.finish_map_gesture()
+        for panel in [*self.figure_panels.values(),*[p for _,p in self.figure_windows.values()]]:panel.camera.home=None
         self.pause()
         self.cancel.set()
         self.revision+=1
-        self.route_history=RouteHistory()
-        self.drag_plot=None; self.drag_index=None; self.drag_snapshot=None
+        self.drag_plot=None; self.drag_index=None; self.drag_snapshot=None;self.drag_editor=None
         self.workbench.invalidate()
+        self.checkpoint_tree.delete(*self.checkpoint_tree.get_children())
+        self.checkpoint_status.set("输入已更改或项目已载入，旧逐点结果失效，请重新计算。")
+        self.auxiliary.invalidate()
         self.loading = True
         self.project = copy.deepcopy(project)
         self.name.set(project.name)
@@ -604,16 +727,19 @@ class App:
                 var.set(matches[0])
             else:
                 var.set("" if value is None else str(value))
-        self.populate_points(project.route.waypoints)
+        self.waypoints.load(project.route.waypoints,project.route.tangent_offsets)
+        self.auxiliary.load()
         self.obstacles.delete("1.0", "end")
         self.obstacles.insert("1.0", "\n".join(",".join(str(x) for x in row) for row in project.route.obstacles))
         self.obstacles.edit_modified(False)
         self.loading = False
         self.dirty = False
         self.result = None
+        self.progress_label.configure(text="项目已载入 · 等待计算")
         self.export_button.configure(state="disabled")
         self._mechanism_controls()
         for canvas in self.canvases.values():
+            if isinstance(canvas,RetainedCanvas):continue
             canvas.delete("all")
             canvas.create_text(30, 40, text="项目已载入，请点击「计算设计」。", fill="#718096", anchor="nw")
         self.report.configure(state="normal")
@@ -647,7 +773,10 @@ class App:
                 p.route.field[int(attr)] = float(value)
             else:
                 setattr(getattr(p, group), attr, value)
-        p.route.waypoints = [[float(x) for x in self.tree.item(item, "values")] for item in self.tree.get_children()]
+        snapshot=self.waypoints.snapshot()
+        p.route.waypoints=snapshot["points"]
+        p.route.tangent_offsets=snapshot["tangents"]
+        p.route.auxiliary_points=self.auxiliary.editor.document.controls()
         try:
             p.route.obstacles = [[float(x.strip()) for x in line.split(",")] for line in
                                  self.obstacles.get("1.0", "end").splitlines() if line.strip()]
@@ -655,100 +784,11 @@ class App:
             raise ProjectError("障碍物应每行填写 x,y,半径。") from exc
         return p
 
-    def populate_points(self, points: list[list[float]]) -> None:
-        self.tree.delete(*self.tree.get_children())
-        for i, point in enumerate(points):
-            self.tree.insert("", "end", iid=str(i), text=str(i+1), values=tuple(str(v) for v in point))
-        self.select_row(None)
-
-    def select_row(self, _event: Any) -> None:
-        selected = self.tree.selection()
-        self.point_selection_status.set(f"已选 {len(selected)} / {len(self.tree.get_children())} 个")
-        for button in self.single_point_buttons:
-            button.configure(state="normal" if len(selected)==1 else "disabled")
-        self.delete_points_button.configure(state="normal" if selected else "disabled")
-        if len(selected)==1:
-            values = self.tree.item(selected[0], "values")
-            self.point_x.set(values[0])
-            self.point_y.set(values[1])
-        else:
-            self.point_x.set(""); self.point_y.set("")
-
-    def select_all_points(self,_event: Any = None) -> str:
-        self.tree.selection_set(self.tree.get_children())
-        self.select_row(None)
-        return "break"
-
-    def clear_point_selection(self) -> None:
-        self.tree.selection_remove(*self.tree.selection())
-        self.select_row(None)
-
-    def delete_selected_points_key(self,_event: Any = None) -> str:
-        self.delete_point()
-        return "break"
-
-    def table_changed(self, points: list[list[float]]) -> None:
-        if len(points)>200 or any(len(row)!=2 or not all(math.isfinite(x) for x in row) for row in points):
-            raise ProjectError("打卡点应不超过 200 个且坐标为有限数字。")
-        previous=self.route_snapshot()
-        self.populate_points(points)
-        self.project.route.tangent_offsets = []
-        self.route_history.commit(previous,self.route_snapshot())
-        self.changed()
-
-    def edit_point(self, add: bool) -> None:
-        if not self.point_details_expanded.get():
-            self.point_details_expanded.set(True)
-            self.toggle_point_details()
-            self.status.set("请在展开的 X/Y 中填写坐标，再点击添加或更新所选。")
-            return
-        try:
-            point = [float(self.point_x.get()), float(self.point_y.get())]
-            if not all(math.isfinite(x) for x in point):
-                raise ValueError
-            points = self.collect().route.waypoints
-            if add:
-                points.append(point)
-            else:
-                selected = self.tree.selection()
-                if len(selected)!=1:
-                    raise ProjectError("更新坐标请只选中一行；多选用于批量删除。")
-                points[int(selected[0])] = point
-            self.table_changed(points)
-        except (ProjectError, ValueError) as exc:
-            messagebox.showerror("打卡点", str(exc) or "坐标应为有限数值。", parent=self.root)
-
-    def delete_point(self) -> None:
-        selected = self.tree.selection()
-        if selected:
-            selected_items=set(selected)
-            points = [[float(x) for x in self.tree.item(item, "values")] for item in self.tree.get_children() if item not in selected_items]
-            self.table_changed(points)
-            self.status.set(f"已删除 {len(selected)} 个打卡点，可撤销；请重新计算后导出。")
-
-    def move_point(self, step: int) -> None:
-        selected = self.tree.selection()
-        if len(selected)>1:
-            self.status.set("上移或下移请只选一行；多选用于批量删除。")
-            return
-        if selected:
-            index = int(selected[0])
-            points = [[float(x) for x in self.tree.item(item, "values")] for item in self.tree.get_children()]
-            target = index+step
-            if 0 <= target < len(points):
-                points[index], points[target] = points[target], points[index]
-                self.table_changed(points)
-                self.tree.selection_set(str(target))
-
-    def import_csv(self) -> None:
-        path = filedialog.askopenfilename(parent=self.root, filetypes=[("坐标 CSV", "*.csv"), ("所有文件", "*.*")])
-        if path:
-            try:
-                self.table_changed(read_waypoints(path))
-            except (OSError, ProjectError) as exc:
-                messagebox.showerror("导入失败", str(exc), parent=self.root)
+    def table_changed(self,points: list[list[float]]) -> None:
+        self.waypoints.apply(points)
 
     def may_discard(self) -> bool:
+        if not self.ensure_editors_idle(): return False
         if not self.dirty:
             return True
         answer = messagebox.askyesnocancel("保存项目", "当前项目有未保存的修改。是否先保存？", parent=self.root)
@@ -786,6 +826,7 @@ class App:
                 messagebox.showerror("打开失败", str(exc), parent=self.root)
 
     def save(self, save_as: bool = False) -> bool:
+        if not self.ensure_editors_idle(): return False
         try:
             project = self.collect()
             path = self.file
@@ -803,7 +844,8 @@ class App:
             return False
 
     def run(self, improve: bool) -> None:
-        if self.busy:
+        if not self.ensure_editors_idle(): return
+        if self.busy or self.auxiliary.busy:
             return
         try:
             project = self.collect()
@@ -888,10 +930,34 @@ class App:
         self.report.delete("1.0", "end")
         self.report.insert("1.0", report_text(result))
         self.report.configure(state="disabled")
+        self.checkpoint_tree.delete(*self.checkpoint_tree.get_children())
+        verified=bool(len(result.profile))
+        for row in result.checkpoint_rows:
+            error=row["error_mm"]
+            state="未验证" if not verified else ("通过" if row["passed"] else "不通过")
+            self.checkpoint_tree.insert("","end",iid=str(row["number"]-1),values=(row["number"],
+                f"{row['target'][0]:g}, {row['target'][1]:g}","—" if not verified or error is None else f"{error:.3f}",
+                result.project.route.tolerance,state),tags=("fail",) if state=="不通过" else ())
+        passed=sum(bool(row["passed"]) for row in result.checkpoint_rows) if verified else 0
+        sampling=result.sampling
+        self.checkpoint_status.set(f"凸轮名义回算：{passed}/{len(result.checkpoint_rows)} 个必过点在容差内；采样 {sampling.get('requested','—')}→{sampling.get('used','—')} 点。点击行定位。\n这是名义回算，最终DXF接触及实车需另验；有其他失败项时不能据此认定整车通过。")
         fail = sum(c.status == "fail" for c in result.checks)
-        self.status.set(f"计算完成 · 驱动轮 {result.stats['drive_distance']:.0f} mm · 约 {result.stats['time']:.1f} s · "
-                        + (f"{fail} 项不满足，请查看检查报告。" if fail else "数值检查通过；实车仍须核对和试跑。"))
+        self.status_label.configure(foreground="#b3263d" if fail else "#546784")
+        self.status.set(f"计算完成 · 名义打卡 {passed}/{len(result.checkpoint_rows)} · 采样 {sampling.get('used','—')} 点 · 驱动轮 {result.stats['drive_distance']:.0f} mm · {result.stats['time']:.1f} s · "
+                        + (f"{fail} 项不满足，请查看检查报告。" if fail else ("数值检查通过；采样稳定性尚未确认，请查看报告。" if not result.precision.get("stable") else "数值检查及采样复算通过；实车仍须核对和试跑。")))
         self.schedule_render()
+
+    def locate_checkpoint(self,event: Any=None) -> None:
+        selected=self.checkpoint_tree.selection()
+        if not selected or self.result is None:return
+        i=int(selected[0])
+        if i>=len(self.result.checkpoint_rows):return
+        self.pause()
+        row=self.result.checkpoint_rows[i]
+        self.frame.set(min(len(self.result.path)-1,int(round(row["position"]))))
+        self.waypoints.tree.selection_set(str(i));self.waypoints.refresh_selection()
+        self.inputs.select(self.waypoints)
+        self.views.select(0);self.schedule_render()
 
     def schedule_render(self) -> None:
         if getattr(self, "render_pending", False):
@@ -900,25 +966,18 @@ class App:
         self.root.after(50, self.render)
 
     def render(self) -> None:
-        self.render_pending = False
-        if self.result is None:
-            if self.views.index(self.views.select())==0: self.draw_route_editor()
-            self.workbench.render(0)
-            return
-        result = self.result
-        index = min(int(self.frame.get()), len(result.path)-1)
-        selected = self.views.index(self.views.select())
-        if selected == 0:
-            self.scene_plot=plotting.scene(self.canvases["scene"], result, index)
-        elif selected == 1:
-            plotting.cam(self.canvases["cam"], result)
-        elif selected == 2:
-            plotting.mechanism(self.canvases["mechanism"], result, index)
-        elif selected == 3:
-            for kind in ("steer", "stroke", "pressure"):
-                plotting.curves(self.canvases[kind], result, kind)
+        self.render_pending=False
+        selected=self.views.index(self.views.select());result=self.result
+        index=0 if result is None else min(int(self.frame.get()),len(result.path)-1)
+        if selected in (0,1):
+            panel=self.figure_panels['scene' if selected==0 else 'cam'];panel.draw()
+            if selected==0:self.scene_plot=panel.plot
+        elif result is not None and selected==2:plotting.mechanism(self.canvases['mechanism'],result,index)
+        elif result is not None and selected==3:
+            for kind in ('steer','stroke','pressure'):plotting.curves(self.canvases[kind],result,kind)
         self.workbench.render(index)
-        self.progress_label.configure(text=f"里程 {result.drive_s[index]:.0f} mm · 前轮 {np.degrees(result.delta[index]):.1f}°")
+        for _,panel in list(self.figure_windows.values()):panel.draw()
+        if result is not None:self.progress_label.configure(text=f'里程 {result.drive_s[index]:.0f} mm · 前轮 {np.degrees(result.delta[index]):.1f}°')
 
     def pause(self) -> None:
         self.playing=False
@@ -949,6 +1008,7 @@ class App:
             self.root.after(40,lambda:self.tick(generation))
 
     def export(self) -> None:
+        if not self.ensure_editors_idle(): return
         result = self.result
         if result is None:
             return
@@ -1028,12 +1088,19 @@ cam.csv：整圈凸轮角、理论/实际坐标、名义转角与压力角，包
 
 新版操作
 
+凸轮点数是起始精度，名义回算漏点/偏差过大时自动加密至最多4000点，实际点数与逐次偏差见报告；达到上限仍失败会明确标红。“检查报告 → 逐点打卡偏差”可查看、点击定位各点。设计路线经过点中心不能代替凸轮回算；名义回算通过也不能代替最终DXF和实车检验。
+
 「同步演示」同屏显示路线、凸轮旋转、转向机构。正常/问题案例可复现，均是理论数据；「返回原项目」恢复载入案例前的输入与结果，不改磁盘文件。
 「问题定位」点击检查行，查看实际值、限制、依据和建议，定位路线/凸轮/曲线。回程问题只定位凸轮，不伪造比赛位置。
-「优化对比」保留原方案，叠加候选路线并比较五项指标。必须自行选择原方案或候选；也可保存两套项目，未改善会如实显示。
-「场地与试跑」勾选地图编辑后，点击空白添加点、拖动已有点。表格同步，打卡点页支持撤销/重做；修改输入后须重新计算。
-打卡点表格支持 Ctrl 多选、Shift 连选，以及“全选”或 Ctrl+A。点“删除所选”或按 Delete 可整批删除，一次撤销可恢复整批点及切线。更新坐标、上移和下移仍每次选一行。
-所有结果页统一使用顶部一排页签，“同步演示 / 问题定位 / 优化对比 / 实测与扰动”各一处。点“场地与试跑”返回设计；小窗口可勾选“显示坐标编辑 / CSV”展开坐标和导入项。
+「优化对比」保留原方案，叠加候选路线并比较八项实际指标（指标表可滚动）。必须自行选择原方案或候选；也可保存两套项目，未改善会如实显示。
+「辅助」页单击 X/Y/所属区间编辑；Enter 提交、Esc 取消、Tab/Shift+Tab 换格。新增使用独立“新增辅助点”区域。蓝色选中行与黄色编辑格分开；非法输入保留原值/草稿并提示。Ctrl/Shift 多选、全选、批量删除、排序、撤销/重做各在本页生效；切页保留草稿和新增输入，不会隐式提交。两类点分别维护历史；Ctrl+Z/Ctrl+Y 按当前点页或地图当前模式选择历史。整项目保存/计算/搜索/采用方案前须明确处理未提交格。
+辅助点仅引导所属区间形状，不要求穿过、不计比赛打卡；同区间取均值，上/下移仅改变显示顺序、不改变区间。区间从起跑位置连接各必过点，首点与起跑同坐标时不重复计段；改变必过点数量/顺序或起点后须核对辅助段号。
+「优化对比」可设置半径、段范围、点上限及预算，搜索整条比赛路线的辅助点。最终候选从真实导出 DXF 重新求接触、转角与轨迹；主设计粗细采样稳定性单独显示，未确认不等于通过。可停止搜索，改输入后过期结果会丢弃；原方案须显式选择才能替换。
+「场地与试跑」地图上方显示“打卡点/辅助点”模式，切左侧点页也会同步。蓝圆=打卡，紫菱“辅N·段N”=辅助；表格与地图选择/编号高亮同步。勾选地图编辑后，空白点击添加当前类型、拖动当前类型；点击另一类点不会误添加。地图添加辅助点使用独立新增区里的所属区间，不覆盖 X/Y 输入。一次拖动一条历史，修改任一类点后须重新计算，旧结果和导出失效。
+已有点位：单击 X/Y 格直接编辑，黄色格与蓝色选中行区分。Enter 提交，Esc 取消当前草稿；Tab/Shift+Tab 校验并保存当前格后切换，非法输入阻止换格。空值、非数字、NaN、无穷值在对应位置提示，原坐标和草稿保留。取消或数值等价不记历史。
+新增：只使用独立“新增点位”区的 X、Y 和“添加”。选行/编辑已有格不会填入新增框。相邻同点提醒但保留；首尾同点可以返回起点，不能自动删掉最后一点。
+点击编号列选行，地图同步红圈及编号。Ctrl 多选、Shift 连选、全选/Ctrl+A、删除/Delete、上移/下移、撤销/重做集中在表格附近；CSV/地图另成组。每次有效提交、新增及一次拖点都有独立历史，修改后须重新计算。
+所有结果页统一使用顶部一排页签，“同步演示 / 问题定位 / 优化对比 / 实测与扰动”各一处。点“场地与试跑”返回设计；小窗口仍保留新增、批量操作及导入入口。
 车辆/机构页点击参数输入框可高亮示意位置。基础和高级参数分组；独立参数配置可保存来源并加载，来源声明未经软件核实。
 「实测与扰动」先保存格式模板，按场地坐标导入传感器实测 CSV。模板没有任何实测点；测试/理论数据须声明 kind=synthetic。预测始终标为理论。
 扰动分析固定原设计的最终 DXF，按用户范围分别扫描驱动轮径与安装相位。仅是单因素几何运动学预测；多因素耦合、动力学和打滑未计算。

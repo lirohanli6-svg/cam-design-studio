@@ -30,10 +30,22 @@ def report_text(result: Result) -> str:
              "min_curvature_radius": "最小凸曲率半径 mm", "min_profile_radius": "轮廓最小半径 mm",
              "max_profile_radius": "轮廓最大半径 mm", "stroke_min": "整圈最小位移 mm",
              "stroke_max": "整圈最大位移 mm", "checkpoint_error": "回算顺序打卡最大偏差 mm",
-             "replay_error": "名义转向回算最大差 mm"}
+             "replay_error": "名义转向回算最大差 mm", "max_steer_rate": "比赛段最大转向变化速度 °/s",
+             "min_contact_gap": "整圈最小接触间隙 mm", "undercut_margin": "整圈局部过切余量 mm",
+             "cam_points_requested": "请求轮廓起始点数", "cam_points_used": "实际轮廓点数"}
     rows.extend(f"- {names.get(key, key)}：{value:.5f}" for key, value in result.stats.items())
     rows.extend(["", "## 检查", ""])
     rows.extend(f"- [{labels[c.status]}] {c.name}：{c.detail}" for c in result.checks)
+    if result.sampling:
+        rows.extend(["", "## 采样加密与逐点打卡", "", "设计曲线经过必过点，不代表凸轮回算必然满足；名义回算通过也不能替代最终DXF接触检验。",
+                     "", "|轮廓点数|名义回算最大差 mm|必过点最大偏差 mm|漏点编号|", "|---|---|---|---|"])
+        rows.extend(f"|{r['points']}|{r['replay_error_mm']:.4f}|{r['checkpoint_error_mm']:.4f}|{r['missed'] or '无'}|" for r in result.sampling["attempts"])
+        rows.extend(["", "|点号|目标 X,Y mm|回算偏差 mm|容差 mm|状态|", "|---|---|---|---|---|"])
+        rows.extend(f"|{r['number']}|{r['target']}|{r['error_mm']:.4f}|{p.route.tolerance:g}|{'通过' if r['passed'] else '不通过'}|" for r in result.checkpoint_rows)
+    rows.extend(["", "## 比赛必过点与辅助控制", "",
+                 f"比赛必过点 {len(p.route.waypoints)} 个，按原顺序打卡；辅助控制点 {len(p.route.auxiliary_points)} 个，不要求曲线穿过，不计入比赛数量。",
+                 "辅助点段号按起点与必过点连接顺序计数；起点与首点同坐标不重复计段。"])
+    rows.extend(f"- 辅助 {i}：比赛段 {int(segment)+1}，引导坐标 ({x:g}, {y:g}) mm" for i,(segment,x,y) in enumerate(p.route.auxiliary_points,1))
     rows.extend(["", "## 凸轮出发点与旋转方向", ""])
     if len(result.profile):
         markings = cam_markings(result)

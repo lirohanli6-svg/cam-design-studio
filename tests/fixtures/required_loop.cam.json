@@ -1,0 +1,120 @@
+{
+  "format": "solar-cam-project",
+  "version": 1,
+  "name": "演示项目 · 尺寸须核对",
+  "demo_mode": true,
+  "vehicle": {
+    "wheelbase": 120.0,
+    "track": 159.0,
+    "front_diameter": 20.0,
+    "drive_diameter": 130.0,
+    "passive_diameter": 130.0,
+    "sensor_x": 100.0,
+    "sensor_y": 0.0,
+    "drive_side": "right",
+    "speed": 80.0,
+    "max_steer": 40.0
+  },
+  "mechanism": {
+    "kind": "flat",
+    "side": "left",
+    "arm": 25.0,
+    "arm_angle": 0.0,
+    "pivot_x": -25.0,
+    "link": 80.0,
+    "branch": 1,
+    "offset": 0.0,
+    "roller": 2.0,
+    "min_stroke": -15.0,
+    "max_stroke": 15.0,
+    "steer_zero": 0.0
+  },
+  "cam": {
+    "base_radius": 40.0,
+    "neutral_lift": 15.0,
+    "hole_diameter": 6.0,
+    "thickness": 4.0,
+    "ratio": 40.0,
+    "direction": -1,
+    "phase": 90.0,
+    "points": 1200.0,
+    "pressure_limit": 45.0,
+    "reference_layers": false
+  },
+  "route": {
+    "field": [
+      0.0,
+      6000.0,
+      0.0,
+      2000.0
+    ],
+    "waypoints": [
+      [
+        410.0,
+        420.0
+      ],
+      [
+        700.0,
+        1580.0
+      ],
+      [
+        1440.0,
+        1100.0
+      ],
+      [
+        3170.0,
+        1560.0
+      ],
+      [
+        4160.0,
+        1440.0
+      ],
+      [
+        5110.0,
+        1630.0
+      ],
+      [
+        5450.0,
+        440.0
+      ],
+      [
+        3250.0,
+        350.0
+      ],
+      [
+        2500.0,
+        750.0
+      ],
+      [
+        410.0,
+        420.0
+      ]
+    ],
+    "obstacles": [],
+    "start_x": 410.0,
+    "start_y": 420.0,
+    "heading": 80.0,
+    "tolerance": 20.0,
+    "tension": 0.75,
+    "step": 5.0,
+    "tangent_offsets": [
+      -8.0,
+      0.0,
+      -8.0,
+      8.0,
+      12.0,
+      4.0,
+      -8.0,
+      -16.0
+    ],
+    "auxiliary_points": [],
+    "steer_rate_limit": 120.0,
+    "start_steer": 0.0
+  },
+  "optimization": {
+    "iterations": 2.0,
+    "smooth_weight": 1.0,
+    "length_weight": 1.0,
+    "pressure_weight": 1.0
+  }
+}

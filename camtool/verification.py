@@ -39,7 +39,7 @@ class VerificationInput:
     start_heading: float
     run_start: float = 0.0
     run_end: float = 240.0
-    angle_step: float = 1.0
+    angle_step: float = 0.5
     contact_tolerance: float = 0.01
     solve_min: float = -80.0
     solve_max: float = 80.0

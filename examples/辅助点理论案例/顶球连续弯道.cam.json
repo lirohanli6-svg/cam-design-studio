@@ -1,0 +1,91 @@
+{
+  "format": "solar-cam-project",
+  "version": 1,
+  "name": "理论案例（非实测）·顶球连续弯道",
+  "demo_mode": true,
+  "vehicle": {
+    "wheelbase": 120.0,
+    "track": 160.0,
+    "front_diameter": 30.0,
+    "drive_diameter": 130.0,
+    "passive_diameter": 130.0,
+    "sensor_x": 60.0,
+    "sensor_y": 0.0,
+    "drive_side": "right",
+    "speed": 80.0,
+    "max_steer": 40.0
+  },
+  "mechanism": {
+    "kind": "ball",
+    "side": "left",
+    "arm": 25.0,
+    "arm_angle": 0.0,
+    "pivot_x": -25.0,
+    "link": 80.0,
+    "branch": 1,
+    "offset": 0.0,
+    "roller": 2.0,
+    "min_stroke": -15.0,
+    "max_stroke": 15.0,
+    "steer_zero": 0.0
+  },
+  "cam": {
+    "base_radius": 40.0,
+    "neutral_lift": 15.0,
+    "hole_diameter": 6.0,
+    "thickness": 4.0,
+    "ratio": 16.0,
+    "direction": 1,
+    "phase": 0.0,
+    "points": 1200,
+    "pressure_limit": 45.0,
+    "reference_layers": true
+  },
+  "route": {
+    "field": [
+      0.0,
+      5000.0,
+      0.0,
+      2000.0
+    ],
+    "waypoints": [
+      [
+        300.0,
+        400.0
+      ],
+      [
+        1100.0,
+        400.0
+      ],
+      [
+        2100.0,
+        850.0
+      ],
+      [
+        3300.0,
+        600.0
+      ],
+      [
+        4400.0,
+        700.0
+      ]
+    ],
+    "obstacles": [],
+    "start_x": 300.0,
+    "start_y": 400.0,
+    "heading": 0.0,
+    "tolerance": 20.0,
+    "tension": 0.75,
+    "step": 5.0,
+    "tangent_offsets": [],
+    "auxiliary_points": [],
+    "steer_rate_limit": 120.0,
+    "start_steer": 0.0
+  },
+  "optimization": {
+    "iterations": 2,
+    "smooth_weight": 1.0,
+    "length_weight": 1.0,
+    "pressure_weight": 1.0
+  }
+}

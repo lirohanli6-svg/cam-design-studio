@@ -89,7 +89,7 @@ try:
         assert not app.dirty and '非实测' in app.parameter_source.get()
         assert hashlib.sha256(user_file.read_bytes()).hexdigest()==digest
         app.run(True); pump(lambda:app.busy)
-        assert page.comparison is not None and len(page.compare_tree.get_children())==5
+        assert page.comparison is not None and len(page.compare_tree.get_children())==8
         assert app.result.project.to_dict()==original.to_dict()
         pair_dir=output/'comparison'; pair_dir.mkdir(exist_ok=True)
         # Export function deliberately rejects existing artifacts. Use a fresh target per run.
@@ -117,7 +117,7 @@ try:
         canvas.event_generate('<B1-Motion>',x=round(x2),y=round(y2))
         canvas.event_generate('<ButtonRelease-1>',x=round(x2),y=round(y2)); pump()
         assert app.route_snapshot()['points'][-1]!=old
-        assert float(app.point_x.get())==app.route_snapshot()['points'][-1][0]
+        assert float(app.tree.item(str(len(app.tree.get_children())-1),'values')[0])==app.route_snapshot()['points'][-1][0]
         app.undo_route(); assert app.route_snapshot()==added
         app.undo_route(); assert app.route_snapshot()==before
         checks['map_click_drag_table_sync_undo_redo_and_invalidation']=True
@@ -165,14 +165,16 @@ try:
             return calculate(project)  # Deliberately ignores cancel to test revision guard too.
         with patch('camtool.ui.calculate',side_effect=delayed):
             app.run(False); pump(lambda:not started.is_set())
-            app.values['vehicle.wheelbase'].set('132')
+            app.waypoints.begin_edit(1,0)
+            app.waypoints.draft_text.set(str(app.route_snapshot()['points'][1][0]+5))
+            assert app.waypoints.commit()
             release.set(); pump(lambda:app.busy)
         assert app.result is None and page.comparison is None
         assert str(app.export_button['state'])=='disabled'
         checks['stale_background_result_never_replaces_new_input']=True
         assert hashlib.sha256(user_file.read_bytes()).hexdigest()==digest
         checks['user_file_unchanged']=True
-        invalid=Project.demo(); invalid.mechanism.pivot_x=-104.6; invalid.cam.pressure_limit=60; invalid.optimization.iterations=1
+        invalid=Project.demo(); invalid.mechanism.pivot_x=-104.7; invalid.cam.pressure_limit=60; invalid.optimization.iterations=1
         app.load(invalid); app.run(True); pump(lambda:app.busy)
         assert page.comparison is not None and page.comparison.original is None
         assert '无法判断改善' in page.compare_status.get()
