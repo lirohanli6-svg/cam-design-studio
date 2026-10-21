@@ -49,7 +49,7 @@
 
 原文档初建与个人Skill安装记录保存在 [本次基线快照](build/v1.7.0-baseline/PROJECT_STATUS.md)，当时仅文档检查及14项点文档测试，不代表任何版本完整发布通过。开发规则仍是AGENTS.md，Skill只有被加载时才生效。
 
-## 最近交接（2026-10-21：1.7.0已完成）
+## 最近功能发布交接（2026-10-21：1.7.0已完成）
 
 - **目标/改动**：场地/凸轮光标锚点缩放、中键平移、等比例网格/比例尺、独立窗口、浏览编辑隔离、播放/选择保留视图及显式定位；保留绘制、16ms合并拖动、单行预览、一次失效和一次历史。关键文件 `viewport.py`、`plot_views.py`、`ui.py:map_* / flush_drag / render`、`plotting.Plot`、`workbench_ui.py`；未改核心数学、硬件、schema、独立求解器或导出尺寸。
 - **发布**：`E:\太阳能小车\太阳能小车凸轮设计工作台_v1.7.0\SolarCam.exe`；同级 `太阳能小车凸轮设计工作台_v1.7.0.zip`。EXE SHA256 `b50a97d4bec84a4403fed95a39b73d97b877223061d0c30c546dc56432937cdc`。旧版/原文件指纹基线 `build/v1.7.0-baseline`。
@@ -59,3 +59,12 @@
 - **证据**：[最终发布凭证](../太阳能小车凸轮设计工作台_v1.7.0/发布验证.json)、`build/final-release-check-v1.7.0.json`、`build/visual-qa/views-v1.7.0`；打包内有说明、源/解压EXE界面验收JSON、截图及初试完整报告。旧版四个目录/三个ZIP和用户原文件最终再核对不变。
 - **未覆盖/限制**：无第二台机器、其他显卡/远程桌面、长时压力、制造或实车/动力学认证；显示不增加工程采样，多窗口/高密图形仍增绘制成本，极限帧率未保证。既有辅助40点、各100条会话历史和采样/搜索限制保留。
 - **下一步/最短恢复**：本需求已完成，无待发布步骤。新任务先读AGENTS对应模块行、当前Git状态，再按`FigurePanel`→`Viewport`或`ui.map_*`定向修改。若有新的闪屏环境，先运行`tools/drag_probe.py <新日志>`及`tools/views_ui_check.py`，保留新证据，勿直接沿用此版本通过结论。
+
+## 最近交接（2026-10-21：GitHub v1.7.0 源码同步）
+
+- **目标与结果**：将当前主工作树的 v1.7.0 同步到公开仓库 [lirohanli6-svg/cam-design-studio](https://github.com/lirohanli6-svg/cam-design-studio) 的 `main`。源码提交为 [`407a48fe8808c7afd4b6f5607a9a28b4173fc85d`](https://github.com/lirohanli6-svg/cam-design-studio/commit/407a48fe8808c7afd4b6f5607a9a28b4173fc85d)，保留远端原提交历史，未强制推送。
+- **范围**：84 个源码、测试、示例和文档文件，其中 71 个新增或更新，未删除远端文件；保留原 `web-demo/` 四个文件及 `作品简介.md`。GitHub README 在本地使用说明前保留作品入口，并明确当前源码为 v1.7.0、在线视频与 PPT 为早期 v1.3.0 材料。生成的公开 README 和同步脚本仅位于忽略的 `build/github-sync-v1.7.0/`，没有覆盖本地 README 或其他提交副本。
+- **实际检查**：在独立源码快照运行 `python -m unittest discover -s tests -q`，93 项通过，测试运行时间 180.183 秒；`python -m mypy camtool main.py build_app.py --check-untyped-defs`，28 个源文件通过。首轮类型检查未把本地 ezdxf 路径传给检查子进程，补齐该进程的 `PYTHONPATH=build-tools` 后仅重跑类型检查通过，未改程序来规避错误。检查时源文件相对快照无变化，`git diff --check` 通过。
+- **远端复核**：重新 fetch `main`，84 个文件的 Git blob 哈希与待上传快照全部一致，5 个保留材料文件的哈希保持不变；版本文件再次读取为 `1.7.0 / 2026-10-21`。清单、测试/类型日志和复核记录分别为 `build/github-sync-v1.7.0/manifest.json`、`validation.json`、`remote-verification.json`。
+- **本地状态**：本次不修改软件运行逻辑、不创建本地主仓库提交、不暂存或清理已有改动；本地主仓库仅追加本节状态。用户原有未提交和未跟踪实现保留，未同步父目录交付副本或参赛材料副本。
+- **未执行与后续**：本次是 GitHub 源码同步，没有重新执行真实 GUI/EXE 门禁、打包、上传新版二进制 Release 或更新在线演示；既有 v1.7.0 本机发布验证见上一节。后续发布 GitHub 下载包时核对准确版本及用户文件范围，不能把历史 v1.3.0 附件当成 v1.7.0。
