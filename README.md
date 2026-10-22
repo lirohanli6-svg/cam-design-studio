@@ -2,7 +2,7 @@
 
 当前源码 **v1.9.0**。武汉1024AI黑客松参赛作品，作者：余灿。
 
-- [新版 PPT 与男声演示视频](https://github.com/lirohanli6-svg/cam-design-studio/releases/tag/v1.9.0)：对应 v1.9.0 诊断优先改进助手；视频不含姓名介绍。
+- [新版 PPT 与男声演示视频](https://github.com/lirohanli6-svg/cam-design-studio/releases/tag/v1.9.0)：对应 v1.9.0 诊断优先改进助手
 - [演示步骤、理论案例与验证证据](materials/v1.9.0/README.md)：压力角问题、用户授权、真实试算及安装代价。
 - [历史在线演示](https://cam-design-studio-yucan.ampletoad4.chatgpt.site)：仍是 v1.3.0 预计算理论播放器，未更新为 v1.9.0 完整计算工具。
 - 本次同步源码和演示材料；v1.9.0 Windows 文件夹已在本地交付，**没有上传该版 EXE 或 Windows ZIP**。旧版 Release 附件保留版本标识。
