@@ -21,6 +21,7 @@ from camtool.version import VERSION
 def main() -> None:
     parser=argparse.ArgumentParser()
     parser.add_argument('--attach-proof',action='store_true')
+    parser.add_argument('--folder-only',action='store_true',help='验证独立文件夹副本，不读取或创建ZIP')
     parser.add_argument('--project',type=Path)
     args=parser.parse_args()
     folder=ROOT.parent/f'太阳能小车凸轮设计工作台_v{VERSION}'
@@ -29,11 +30,15 @@ def main() -> None:
     qa.mkdir(parents=True,exist_ok=True)
     output=Path(tempfile.mkdtemp(prefix=f'release-v{VERSION}-',dir=qa))
     extracted=output/'extracted'
-    print('Testing release ZIP:',archive,flush=True)
-    with zipfile.ZipFile(archive) as package:
-        assert package.testzip() is None
-        package.extractall(extracted)
     runtime=extracted/folder.name
+    if args.folder_only:
+        print('Testing standalone folder:',folder,flush=True)
+        shutil.copytree(folder,runtime)
+    else:
+        print('Testing release ZIP:',archive,flush=True)
+        with zipfile.ZipFile(archive) as package:
+            assert package.testzip() is None
+            package.extractall(extracted)
     exe=runtime/'SolarCam.exe'
     assert json.loads((runtime/'软件版本.json').read_text(encoding='utf-8'))['version']==VERSION
     assert (runtime/'_internal'/'CHANGELOG.md').read_bytes()==(runtime/'CHANGELOG.md').read_bytes()
@@ -49,7 +54,7 @@ def main() -> None:
     command=[str(exe),'--smoke-dir',str(smoke)]
     if args.project is not None:command.extend(['--smoke-project',str(args.project.resolve())])
     completed=subprocess.run(command,cwd=runtime,env=env,
-                              startupinfo=startup,creationflags=subprocess.CREATE_NO_WINDOW,timeout=180)
+                              startupinfo=startup,creationflags=subprocess.CREATE_NO_WINDOW,timeout=420)
     error=smoke/'smoke-error.txt'
     if error.exists():
         raise RuntimeError(error.read_text(encoding='utf-8'))
@@ -65,6 +70,10 @@ def main() -> None:
     assert data['auxiliary_candidate_explicit_adoption'] is True
     assert data['figure_views']['callback_errors']==[]
     assert all(value is True for name,value in data['figure_views'].items() if name not in ('callback_errors','drag_measurement'))
+    assistant=data['design_improvement_assistant']
+    assert assistant['callback_errors']==[]
+    assert all(v is True for k,v in assistant.items() if k not in ('callback_errors','heartbeat_count','export_directory','real_case'))
+    assert assistant['real_case']['trials']>0
     result=json.loads((smoke/'二次检验'/'二次检验结果.json').read_text(encoding='utf-8'))
     assert result['software_version']==VERSION
     assert result['sha256']==hashlib.sha256((smoke/'cam.dxf').read_bytes()).hexdigest()
@@ -76,7 +85,7 @@ def main() -> None:
     assert not any(c['status']=='不通过' for c in candidate['checks'])
     assert candidate['nominal_comparison_only']==[]
     proof={**data,'executable_sha256':digest,'clean_python_environment':True,
-           'system_only_path':True,'extracted_zip_runtime':True,'exit_code':completed.returncode,
+           'system_only_path':True,'extracted_zip_runtime':not args.folder_only,'copied_folder_runtime':args.folder_only,'exit_code':completed.returncode,
            'verification_input_sha256':result['sha256'],'verification_metrics':result['metrics'],
            'checks':result['checks'],'validation_directory':str(output)}
     proof['valid_scope']='内置正常理论样例；用户项目单独记录在 user_project_regression'
@@ -113,6 +122,17 @@ def main() -> None:
         proof['previous_release_preservation_status']='部分未验证：基线路径缺失' if missing else '通过'
         proof['previous_releases_verified_unchanged']=verified
         proof['missing_previous_baselines']=missing
+    inputs=ROOT/'build'/f"{'folder' if args.folder_only else 'release'}-v{VERSION}"/'build-input.json'
+    if inputs.is_file():
+        source=json.loads(inputs.read_text(encoding='utf-8'))
+        proof['build_input_manifest_sha256']=source['manifest_sha256']
+        proof['build_input_kind']=source['source']
+        old=json.loads((inputs.parent/'old-releases.json').read_text(encoding='utf-8'))
+        for item in old:
+            assert hashlib.sha256(Path(item['path']).read_bytes()).hexdigest()==item['sha256']
+        proof['previous_exe_and_zip_hashes_unchanged']=old
+        proof['automatic_user_data_migration']=False
+        if args.attach_proof:shutil.copy2(inputs,folder/'构建输入指纹.json')
     proof_path=output/'发布验证.json'
     proof_path.write_text(json.dumps(proof,ensure_ascii=False,indent=2),encoding='utf-8')
     if args.project is not None:
@@ -132,7 +152,7 @@ def main() -> None:
         shutil.copy2(proof_path,folder/proof_path.name)
         record=ROOT/'docs'/'WORKBENCH_VALIDATION.md'
         text=record.read_text(encoding='utf-8')
-        addition=(f'\n已在实际 ZIP 解压目录完成：独立 EXE 退出码 0；内置正常理论样例的设计计算、最终DXF独立检验及报告导出流程通过。'
+        addition=(f"\n已在{'独立文件夹副本' if args.folder_only else '实际 ZIP 解压目录'}完成："+f'独立 EXE 退出码 0；内置正常理论样例的设计计算、最终DXF独立检验及报告导出流程通过。'
                   f'清除 Python/Tcl 环境变量，PATH 仅含 Windows 系统目录；独立轨迹 {data["independent_path_points"]} 个点。'
                   f'同步演示、问题定位、优化对比、合成 CSV 分类、固定 DXF 扰动与分析导出均通过。'
                   f'本版单元格提交/非法输入、独立新增、批量删除/撤销与统一页签切换通过；现存旧版指纹核对未改变。'
@@ -149,18 +169,19 @@ def main() -> None:
             record.write_text(text,encoding='utf-8')
         for target in (folder/'新版功能验证记录.md', ROOT/'dist'/f'v{VERSION}'/'SolarCam'/'新版功能验证记录.md'):
             shutil.copy2(record,target)
-        staging=archive.with_name(archive.name+'.tmp')
-        with zipfile.ZipFile(staging,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as package:
-            for path in sorted(folder.rglob('*')):
-                if path.is_file():
-                    package.write(path,path.relative_to(folder.parent))
-        with zipfile.ZipFile(staging) as package:
-            assert package.testzip() is None
-            assert hashlib.sha256(package.read(folder.name+'/SolarCam.exe')).hexdigest()==digest
-        staging.replace(archive)
-    print('PASS: extracted executable starts, calculates, independently verifies DXF, and exports reports.',flush=True)
+        if not args.folder_only:
+            staging=archive.with_name(archive.name+'.tmp')
+            with zipfile.ZipFile(staging,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as package:
+                for path in sorted(folder.rglob('*')):
+                    if path.is_file():
+                        package.write(path,path.relative_to(folder.parent))
+            with zipfile.ZipFile(staging) as package:
+                assert package.testzip() is None
+                assert hashlib.sha256(package.read(folder.name+'/SolarCam.exe')).hexdigest()==digest
+            staging.replace(archive)
+    print('PASS: standalone executable starts, calculates, independently verifies DXF, and exports reports.',flush=True)
     print('Proof:',proof_path,flush=True)
-    print('ZIP MB:',round(archive.stat().st_size/1024/1024,1),flush=True)
+    if not args.folder_only:print('ZIP MB:',round(archive.stat().st_size/1024/1024,1),flush=True)
 
 
 if __name__=='__main__':

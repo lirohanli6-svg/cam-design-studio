@@ -22,6 +22,10 @@ from .version import VERSION
 def demo_project(problem: bool = False) -> Project:
     p = Project.demo()
     p.name = "问题演示（理论案例）" if problem else "正常演示（理论案例）"
+    # Refine only sampling for the discoverable cases; keep route, hardware and
+    # limits of the original demo. Project.demo() retains the legacy baseline.
+    p.route.step = 1.25
+    p.cam.points = 2000
     if problem:
         p.vehicle.max_steer = 5
         p.cam.pressure_limit = 15
@@ -70,6 +74,20 @@ class Diagnostic:
     curve_kind: str = "steer"
     point: list[float] | None = None
     scope: str = "未提供可定位采样值"
+    measurements: dict[str,Any] = field(default_factory=dict)
+    pose: dict[str,Any] | None = None
+    impact: str = "本项不满足时，当前设计的适用范围或计算依据不足，须查看判定依据。"
+
+
+def cam_location(result: Result,index: int) -> dict[str,Any]:
+    """Nearest sampled pose; return has no invented competition route point."""
+    angle=float(np.degrees(result.cam_angle[index]));phi=cam_degrees(result)
+    route_index=int(np.argmin(abs(phi-angle))) if len(phi) and angle<=phi[-1]+1e-9 else None
+    return dict(angle_deg=angle,scope="比赛运行段" if route_index is not None else "整圈回程段；无比赛路线对应位置",
+                point=None if route_index is None else result.path[route_index].tolist(),route_index=route_index,
+                steer_deg=float(np.degrees(result.cam_delta[index])),pivot_mm=result.pivot.tolist(),
+                follower_center_mm=None if index>=len(result.contact_centers) else result.contact_centers[index].tolist(),
+                note="有限采样位置与机构姿态，不是连续最坏点证明")
 
 
 def diagnostics(result: Result) -> list[Diagnostic]:
@@ -79,6 +97,22 @@ def diagnostics(result: Result) -> list[Diagnostic]:
     for check in result.checks:
         d = Diagnostic(check.name, check.status, check.detail, "见判定依据", check.detail,
                        "核对本项参数与模型适用范围后重新计算；不能保证调整后通过。")
+        d.impact = {
+            "前轮转角": "所需转角超出填写的机械限位，当前路线无法按该约束执行。",
+            "完整周期转向": "整圈所需转角超出限位；超限若发生在回程，比赛段正常也不能保证整圈机构可运动。",
+            "压力角": "超过项目压力角门槛；压力角用于评估传力方向，侧向载荷与驱动力仍需另行核算。",
+            "完整周期行程": "从动件位置超出填写的可用行程，可能触及机构限位。",
+            "顺序打卡": "名义回算未按顺序在比赛容差内访问所有必过点。",
+            "名义转向正向回算": "离散凸轮转角回算偏离目标路线，插值路线过点不能代表实际输出。",
+            "场地边界": "传感器或轮心越过已输入的场地边界；车壳与轮宽仍未包含。",
+            "圆形障碍物": "传感器或轮心轨迹与已输入圆障碍相交；车壳与轮宽仍需另查。",
+            "单圈容量": "比赛路线占用过多凸轮转角，未保留模型要求的回程空间。",
+            "基圆与中心孔": "轮廓不满足设定基圆或中心孔边界，不能按当前尺寸交付。",
+            "局部过切": "局部曲率相对滚子/球半径过紧，偏置轮廓可能产生尖点或过切。",
+            "全局接触干涉": "轮廓其他位置侵入滚子/球，当前理想接触姿态不可实现。",
+            "转向变化速度": "恒定地速下的转向变化超过规划门槛，执行能力需核算。",
+            "机构可逆传动": "可能经过死点或多解区间，位移不能可靠地唯一反求转角。",
+        }.get(check.name, d.impact)
         route_index: int | None = None
         cam_index: int | None = None
         if check.name == "前轮转角":
@@ -99,6 +133,14 @@ def diagnostics(result: Result) -> list[Diagnostic]:
             stroke = result.contact_centers[:,1]-neutral
             violation = np.maximum(m.min_stroke-stroke, stroke-m.max_stroke)
             cam_index = int(np.argmax(violation if np.max(violation)>0 else np.abs(stroke)))
+            imin,imax=int(np.argmin(stroke)),int(np.argmax(stroke))
+            lo,hi=float(stroke[imin]),float(stroke[imax])
+            d.measurements=dict(min_mm=lo,max_mm=hi,span_mm=hi-lo,allowed_min_mm=m.min_stroke,
+                allowed_max_mm=m.max_stroke,available_span_mm=m.max_stroke-m.min_stroke,
+                negative_excess_mm=max(0.,m.min_stroke-lo),positive_excess_mm=max(0.,hi-m.max_stroke),
+                minimum_location=cam_location(result,imin),maximum_location=cam_location(result,imax),
+                classification="总跨度不足" if hi-lo>m.max_stroke-m.min_stroke else (
+                    "跨度可容纳但中位分配越界" if lo<m.min_stroke or hi>m.max_stroke else "行程在范围内"))
             d.curve_kind = "stroke"
             d.actual, d.limit = f"{stroke[cam_index]:.4f} mm", f"{m.min_stroke:g}～{m.max_stroke:g} mm"
             d.advice = "根据整圈位移与实测滑块/摆臂可用行程的差值，核对中位、臂长和限位；不得把尚未实测的行程扩大后当作通过。"
@@ -185,7 +227,21 @@ def diagnostics(result: Result) -> list[Diagnostic]:
                 d.actual,d.limit=f"最小 |dY/dδ| {abs(derivative[i]):.5f} mm/rad",f"导数同号且 |dY/dδ| > {m.arm*.001:g}"
                 d.basis+=" 标记为区间扫描转角最近的凸轮采样位置，并非解析死点的精确角。"
             d.advice="检查平推连杆中位、分支和转轴位置是否跨越死点。改动机构后必须按实测装配重新核查闭合、多解和整圈行程。"
+        if check.name in ("前轮转角","完整周期转向"):
+            values=result.delta if check.name=="前轮转角" else result.cam_delta
+            if len(values):d.measurements=dict(actual_deg=float(np.degrees(abs(values)).max()),limit_deg=v.max_steer)
+        elif check.name=="压力角" and len(result.pressure):
+            d.measurements=dict(actual_deg=float(result.pressure.max()),limit_deg=c.pressure_limit)
+        elif check.name=="局部过切" and cam_index is not None:
+            d.measurements=dict(curvature_radius_mm=rho,required_radius_mm=m.roller*1.01,contact_radius_mm=m.roller)
+        elif check.name=="全局接触干涉" and result.geometry:
+            d.measurements=dict(gap_mm=float(result.geometry['minimum']),limit_mm=-max(.02,m.roller*.01),
+                                nearest_segment=int(result.geometry['segments'][int(result.geometry['index'])]))
+        elif check.name=="单圈容量":
+            d.measurements=dict(usage=result.stats['cam_usage'],limit=.98,drive_diameter_mm=v.drive_diameter,
+                                passive_diameter_mm=v.passive_diameter,drive_to_cam_ratio=c.ratio)
         if cam_index is not None:
+            d.pose=cam_location(result,cam_index)
             d.angle_deg = float(np.degrees(result.cam_angle[cam_index]))
             route_index = int(np.argmin(abs(phi-d.angle_deg))) if d.angle_deg<=phi[-1]+1e-9 else None
             d.scope = "比赛运行段" if route_index is not None else "整圈回程段；无比赛路线对应位置"

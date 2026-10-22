@@ -28,6 +28,11 @@ def main() -> None:
             directory = args.smoke_dir
             directory.mkdir(parents=True, exist_ok=True)
             try:
+                packaged_cases=Path(sys.executable).parent/'可复现理论案例'
+                if getattr(sys,'frozen',False):
+                    app.load(Project.load(packaged_cases/'正常方案.cam.json'))
+                    assert app.collect().to_dict()==demo_project().to_dict()
+                    assert VERSION in root.title()
                 app.show_result(calculate(app.collect()))
                 root.update_idletasks()
                 app.render()
@@ -60,7 +65,8 @@ def main() -> None:
                 root.update_idletasks(); app.render()
                 assert int(app.frame.get())==index_at_time(original,float(page.time.get()))
                 assert all(page.canvases[key].find_all() for key in ("demo_route","demo_cam","demo_mechanism"))
-                problem=calculate(demo_project(True)); assert not problem.valid
+                problem_project=Project.load(packaged_cases/'问题方案.cam.json') if getattr(sys,'frozen',False) else demo_project(True)
+                problem=calculate(problem_project); assert not problem.valid
                 app.show_result(problem)
                 app.views.select(page.frames["issues"])
                 issue=next(i for i,d in enumerate(page.diags) if d.name=="前轮转角")
@@ -184,12 +190,15 @@ def main() -> None:
                     app.load(checked.result.project);app.show_result(checked.result)
                     user_editor_compatibility=True
                     user_summary=checked.summary
+                from camtool.improvement_smoke import check_improvement
+                synthetic_ok=page.track.metadata['kind']=='synthetic'
+                improvement_checks=check_improvement(app,directory/'设计改进助手验收')
                 directory.joinpath("smoke.json").write_text(json.dumps({"ok": True, "valid": original.valid,
                     "project_roundtrip": True, "dxf_audit": True, "frozen": getattr(sys, "frozen", False),
                     "executable": sys.executable, "software_version": VERSION, "independent_verification": independent.kinematic_pass,
                     "independent_path_points": len(independent.path), "verification_report_export": True,
                     "synchronized_demo": True,"problem_location": True,"optimization_comparison": True,
-                    "synthetic_csv_distinguished": page.track.metadata['kind']=='synthetic',
+                    "synthetic_csv_distinguished": synthetic_ok,
                     "fixed_dxf_prediction": True,"analysis_export": analysis.is_file(),
                     "bulk_waypoint_delete_undo": True,"single_navigation": True,
                     "inline_waypoint_edit": True,"isolated_waypoint_add": True,"waypoint_validation": True,
@@ -197,6 +206,7 @@ def main() -> None:
                     "auxiliary_candidate_explicit_adoption": True,
                     "dual_point_editor": editor_checks,
                     "figure_views": view_checks,
+                    "design_improvement_assistant": improvement_checks,
                     "user_auxiliary_editor_compatibility": user_editor_compatibility,
                     "user_search_candidate_editor": user_search_editor,
                     "user_project_regression": user_summary, "stats": original.stats}, ensure_ascii=False), encoding="utf-8")

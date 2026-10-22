@@ -12,7 +12,9 @@ from typing import Any
 
 
 class ProjectError(ValueError):
-    """Invalid user input, presented directly in the desktop UI."""
+    """Invalid input; optional field keys let the UI locate it without report parsing."""
+    def __init__(self,message: str,*,fields: tuple[str,...] = ()) -> None:
+        super().__init__(message);self.fields=fields
 
 
 @dataclass
@@ -123,14 +125,14 @@ class Project:
             return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
         if not isinstance(self.name, str) or not isinstance(self.demo_mode, bool):
             raise ProjectError("项目名称或演示标记格式错误。")
-        for group, default in [(self.vehicle, Vehicle()), (self.mechanism, Mechanism()),
-                               (self.cam, Cam()), (self.optimization, Optimization())]:
+        for group_name, group, default in [("vehicle",self.vehicle, Vehicle()), ("mechanism",self.mechanism, Mechanism()),
+                               ("cam",self.cam, Cam()), ("optimization",self.optimization, Optimization())]:
             for key, expected in vars(default).items():
                 value = getattr(group, key)
                 valid = isinstance(value, str) if isinstance(expected, str) else (
                     isinstance(value, bool) if isinstance(expected, bool) else number(value))
                 if not valid:
-                    raise ProjectError(f"项目字段 {key} 格式错误。")
+                    raise ProjectError(f"项目字段 {group_name}.{key} 格式错误，须为有限数值或有效选项。",fields=(f"{group_name}.{key}",))
         if self.vehicle.drive_side not in ("left", "right") or self.mechanism.kind not in ("flat", "ball") or self.mechanism.side not in ("left", "right"):
             raise ProjectError("项目中的机构或驱动侧不支持。")
         if self.cam.direction not in (-1, 1) or self.mechanism.branch not in (-1, 1):
@@ -138,17 +140,17 @@ class Project:
         r = self.route
         for key in ("start_x", "start_y", "tolerance", "tension", "step", "steer_rate_limit", "start_steer"):
             if not number(getattr(r, key)):
-                raise ProjectError(f"路线字段 {key} 格式错误。")
+                raise ProjectError(f"路线字段 {key} 格式错误。",fields=(f"route.{key}",))
         if r.heading is not None and not number(r.heading):
-            raise ProjectError("项目中的起跑方向格式错误。")
-        for values, width in [(r.waypoints, 2), (r.obstacles, 3), (r.auxiliary_points, 3)]:
+            raise ProjectError("项目中的起跑方向格式错误。",fields=('route.heading',))
+        for field_key, values, width in [("route.waypoints",r.waypoints, 2), ("route.obstacles",r.obstacles, 3), ("route.auxiliary_points",r.auxiliary_points, 3)]:
             if not isinstance(values, list) or any(not isinstance(row, list) or len(row) != width
                  or not all(number(x) for x in row) for row in values):
-                raise ProjectError("项目中的打卡点或障碍物行格式错误。")
+                raise ProjectError("项目中的打卡点或障碍物行格式错误。",fields=(field_key,))
         if not isinstance(r.field, list) or len(r.field) != 4 or not all(number(x) for x in r.field):
-            raise ProjectError("项目场地边界格式错误。")
+            raise ProjectError("项目场地边界格式错误。",fields=('bounds.0','bounds.1','bounds.2','bounds.3'))
         if not isinstance(r.tangent_offsets, list) or not all(number(x) for x in r.tangent_offsets):
-            raise ProjectError("项目路线调整格式错误。")
+            raise ProjectError("项目路线调整格式错误。",fields=('route.tangent_offsets',))
 
     def save(self, path: str | Path) -> None:
         target = Path(path)

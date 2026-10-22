@@ -54,34 +54,27 @@ class AuxiliaryEditor(PointTableEditor):
         self.segment_error=tk.StringVar()
         form=ttk.LabelFrame(footer,text="新增辅助点（独立输入）",padding=3)
         form.pack(fill="x",pady=(2,0))
-        for i,(axis,var) in enumerate(zip(("X","Y"),(self.new_x,self.new_y))):
+        # One input row and one shared validation row keep the point table usable
+        # at 1000x640 even when all three input errors are visible.
+        fields=(("X",self.new_x,self.new_errors[0]),("Y",self.new_y,self.new_errors[1]),
+                ("所属区间",self.new_segment,self.segment_error))
+        for i,(axis,var,error) in enumerate(fields):
             ttk.Label(form,text=axis).grid(row=0,column=i*2,sticky="w")
-            entry=ttk.Entry(form,textvariable=var,width=9)
+            entry=ttk.Entry(form,textvariable=var,width=7 if i<2 else 4)
             entry.grid(row=0,column=i*2+1,sticky="ew",padx=3)
-            entry.bind("<Return>",self._add_key); self.new_entries.append(entry)
-            tk.Label(form,textvariable=self.new_errors[i],fg="#b3263d",bg="#edf2f8",
-                     font=("Microsoft YaHei UI",8),wraplength=180,height=1,anchor="nw").grid(
-                         row=1,column=i*2,columnspan=2,sticky="ew")
-            # Empty validation rows consume no space in the smallest window.
-            label=form.grid_slaves(row=1,column=i*2)[0]
-            def show_error(*args: Any,var: tk.StringVar=self.new_errors[i],label: Any=label) -> None:
+            entry.bind("<Return>",self._add_key)
+            if i<2:self.new_entries.append(entry)
+            else:self.segment_entry=entry
+            label=tk.Label(form,textvariable=error,fg="#b3263d",bg="#edf2f8",
+                           font=("Microsoft YaHei UI",8),wraplength=135,height=1,anchor="nw")
+            label.grid(row=1,column=i*2,columnspan=2,sticky="ew")
+            def show_error(*args: Any,var: tk.StringVar=error,label: Any=label) -> None:
                 if var.get():label.grid()
                 else:label.grid_remove()
-            self.new_errors[i].trace_add("write",show_error);show_error()
-        form.columnconfigure(1,weight=1);form.columnconfigure(3,weight=1)
-        ttk.Label(form,text="所属区间").grid(row=2,column=0,sticky="w")
-        self.segment_entry=ttk.Entry(form,textvariable=self.new_segment,width=8)
-        self.segment_entry.grid(row=2,column=1,sticky="ew",padx=3)
-        self.segment_entry.bind("<Return>",self._add_key)
-        self.add_button=ttk.Button(form,text="添加",command=self.add,width=6,padding=(5,3))
-        self.add_button.grid(row=2,column=3,sticky="e")
-        segment_label=tk.Label(form,textvariable=self.segment_error,fg="#b3263d",bg="#edf2f8",
-                 font=("Microsoft YaHei UI",8),wraplength=370,height=1,anchor="nw")
-        segment_label.grid(row=3,column=0,columnspan=4,sticky="ew")
-        def show_segment_error(*args: Any) -> None:
-            if self.segment_error.get():segment_label.grid()
-            else:segment_label.grid_remove()
-        self.segment_error.trace_add("write",show_segment_error);show_segment_error()
+            error.trace_add("write",show_error);show_error()
+            form.columnconfigure(i*2+1,weight=1)
+        self.add_button=ttk.Button(form,text="添加",command=self.add,width=5,padding=(5,3))
+        self.add_button.grid(row=0,column=6,sticky="e")
 
     def build_other(self,footer: ttk.Frame,map_edit: tk.BooleanVar) -> None:
         frame=ttk.Frame(footer);frame.pack(fill="x",pady=2)

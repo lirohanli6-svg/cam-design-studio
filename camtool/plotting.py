@@ -133,7 +133,8 @@ def scene(canvas: tk.Canvas, result: Result, index: int, *, selected: Iterable[i
     passed=sum(bool(row['passed']) for row in result.checkpoint_rows)
     fails=sum(c.status=='fail' for c in result.checks)
     visits=f"名义打卡 {passed}/{len(result.checkpoint_rows)}" if len(result.profile) else "无凸轮，名义打卡未验证"
-    overall=f"整体 {fails} 项不满足" if fails else "仍需核对采样稳定性及最终DXF"
+    overall=f"整体 {fails} 项不满足" if fails else (
+        "主设计采样复算通过·最终DXF另验" if result.precision.get("stable") else "主设计采样未确认·最终DXF另验")
     canvas.create_text(14,canvas.winfo_height()-6,anchor="sw",width=max(160,canvas.winfo_width()-28),
                        text=f"{visits} · {overall} · 实际 {int(result.stats.get('cam_points_used',0))} 点",
                        fill="#b3263d" if fails else "#875c18",tags="checkpoint_banner")

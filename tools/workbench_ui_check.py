@@ -17,7 +17,7 @@ from camtool.ui import App, prepare_display
 from camtool.workbench import time_axis
 from camtool.version import VERSION
 
-output=ROOT/'build'/'visual-qa'/f'workbench-v{VERSION}'
+output=Path(sys.argv[1]) if len(sys.argv)>1 else ROOT/'build'/'visual-qa'/f'workbench-v{VERSION}'
 output.mkdir(parents=True,exist_ok=True)
 prepare_display()
 root=tk.Tk(); app=App(root); page=app.workbench

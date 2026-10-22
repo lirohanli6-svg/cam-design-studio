@@ -67,64 +67,64 @@ def validate(p: Project) -> None:
                     raise ProjectError("尺寸和设置必须为有限数值。")
         if any(getattr(v, k) <= 0 for k in ("wheelbase", "track", "front_diameter",
                                            "drive_diameter", "passive_diameter", "speed")):
-            raise ProjectError("轴距、轮距、轮径和速度必须大于零。")
+            raise ProjectError("轴距、轮距、轮径和速度必须大于零。",fields=tuple('vehicle.'+k for k in ('wheelbase','track','front_diameter','drive_diameter','passive_diameter','speed') if getattr(v,k)<=0))
         if v.sensor_x <= 0:
-            raise ProjectError("本版传感器必须在后轴前方（传感器 X > 0）。")
+            raise ProjectError("本版传感器必须在后轴前方（传感器 X > 0）。",fields=('vehicle.sensor_x',))
         if v.drive_side not in ("left", "right") or m.kind not in ("flat", "ball") or m.side not in ("left", "right"):
             raise ProjectError("驱动侧或机构选项不支持。")
         if not 0 < v.max_steer < 85 or not 0 < c.pressure_limit < 85:
-            raise ProjectError("转向角/压力角上限应在 0° 到 85° 之间。")
+            raise ProjectError("转向角/压力角上限应在 0° 到 85° 之间。",fields=tuple(k for k,x in [('vehicle.max_steer',v.max_steer),('cam.pressure_limit',c.pressure_limit)] if not 0<x<85))
         if min(m.arm, m.link, m.roller, c.base_radius, c.thickness, c.ratio) <= 0:
-            raise ProjectError("臂长、连杆、接触半径、基圆、厚度和传动比必须大于零。")
+            raise ProjectError("臂长、连杆、接触半径、基圆、厚度和传动比必须大于零。",fields=tuple(k for k,x in [('mechanism.arm',m.arm),('mechanism.link',m.link),('mechanism.roller',m.roller),('cam.base_radius',c.base_radius),('cam.thickness',c.thickness),('cam.ratio',c.ratio)] if x<=0))
         if c.neutral_lift < 0 or not 0 <= c.hole_diameter < 2*c.base_radius:
-            raise ProjectError("中位抬升量不能为负，孔径应小于基圆直径。")
+            raise ProjectError("中位抬升量不能为负，孔径应小于基圆直径。",fields=('cam.neutral_lift','cam.hole_diameter','cam.base_radius'))
         if m.min_stroke >= m.max_stroke or m.branch not in (-1, 1) or c.direction not in (-1, 1):
-            raise ProjectError("行程上下限、连杆分支或凸轮旋向设置不正确。")
+            raise ProjectError("行程上下限、连杆分支或凸轮旋向设置不正确。",fields=('mechanism.min_stroke','mechanism.max_stroke','mechanism.branch','cam.direction'))
         if int(c.points) != c.points or not 360 <= c.points <= 4000:
-            raise ProjectError("廓线点数应为 360～4000 的整数。")
+            raise ProjectError("廓线点数应为 360～4000 的整数。",fields=('cam.points',))
         if int(o.iterations) != o.iterations or not 1 <= o.iterations <= 6:
-            raise ProjectError("优化轮数应为 1～6 的整数。")
+            raise ProjectError("优化轮数应为 1～6 的整数。",fields=('optimization.iterations',))
         if min(o.smooth_weight, o.length_weight, o.pressure_weight) < 0:
-            raise ProjectError("优化权重不能为负。")
+            raise ProjectError("优化权重不能为负。",fields=tuple('optimization.'+k for k in ('smooth_weight','length_weight','pressure_weight') if getattr(o,k)<0))
         if not 1 <= r.step <= 20 or not 0.2 <= r.tension <= 1.5 or r.tolerance < 0:
-            raise ProjectError("采样步长应为 1～20 mm，路线张力 0.2～1.5，容差不能为负。")
+            raise ProjectError("采样步长应为 1～20 mm，路线张力 0.2～1.5，容差不能为负。",fields=tuple(k for k,ok in [('route.step',1<=r.step<=20),('route.tension',.2<=r.tension<=1.5),('route.tolerance',r.tolerance>=0)] if not ok))
         for value in (r.start_x, r.start_y, r.tolerance, r.tension, r.step):
             if not math.isfinite(value):
                 raise ProjectError("起点及路线设置必须是有限数值。")
         if r.heading is not None and not math.isfinite(r.heading):
-            raise ProjectError("方向角必须为有限数值或留空。")
+            raise ProjectError("方向角必须为有限数值或留空。",fields=('route.heading',))
         bounds = np.asarray(r.field, dtype=float)
         points = np.asarray(r.waypoints, dtype=float)
         if bounds.shape != (4,) or not np.isfinite(bounds).all() or bounds[0] >= bounds[1] or bounds[2] >= bounds[3]:
-            raise ProjectError("场地输入顺序为 xmin,xmax,ymin,ymax，最大值必须大于最小值。")
+            raise ProjectError("场地输入顺序为 xmin,xmax,ymin,ymax，最大值必须大于最小值。",fields=('bounds.0','bounds.1','bounds.2','bounds.3'))
         if points.ndim != 2 or points.shape[1] != 2 or not 2 <= len(points) <= 200 or not np.isfinite(points).all():
-            raise ProjectError("打卡点应为 2～200 行，每行两列有限坐标。")
+            raise ProjectError("打卡点应为 2～200 行，每行两列有限坐标。",fields=('route.waypoints',))
         if np.any(np.linalg.norm(np.diff(points, axis=0), axis=1) < 0.01):
-            raise ProjectError("相邻打卡点不能重合；若起点即第一点，只填一次即可。")
+            raise ProjectError("相邻打卡点不能重合；若起点即第一点，只填一次即可。",fields=('route.waypoints',))
         start = np.array([r.start_x, r.start_y])
         effective = np.vstack([start, points]) if np.linalg.norm(points[0]-start) > 0.01 else points
         length = float(np.sum(np.linalg.norm(np.diff(effective, axis=0), axis=1)))
         if length > 200000:
-            raise ProjectError("路线过长，请检查毫米单位。")
+            raise ProjectError("路线过长，请检查毫米单位。",fields=('route.waypoints','route.start_x','route.start_y'))
         if length/r.step > 50000:
-            raise ProjectError("采样点过多；请增大采样步长或缩短路线。")
+            raise ProjectError("采样点过多；请增大采样步长或缩短路线。",fields=('route.step','route.waypoints'))
         if any(not math.isfinite(x) or abs(x) > 60 for x in r.tangent_offsets):
-            raise ProjectError("路线局部切线调整必须为 ±60° 内的有限数值。")
+            raise ProjectError("路线局部切线调整必须为 ±60° 内的有限数值。",fields=('route.tangent_offsets',))
         for obstacle in r.obstacles:
             if len(obstacle) != 3 or not all(math.isfinite(x) for x in obstacle) or obstacle[2] <= 0:
-                raise ProjectError("每个障碍物输入 x,y,半径，半径应大于零。")
+                raise ProjectError("每个障碍物输入 x,y,半径，半径应大于零。",fields=('route.obstacles',))
         if not 0 < r.steer_rate_limit <= 10000:
-            raise ProjectError("转向变化速度上限须为 0～10000°/s 内的正数。")
+            raise ProjectError("转向变化速度上限须为 0～10000°/s 内的正数。",fields=('route.steer_rate_limit',))
         if abs(r.start_steer)>v.max_steer:
-            raise ProjectError("起跑前轮角超出车辆限位。")
+            raise ProjectError("起跑前轮角超出车辆限位。",fields=('route.start_steer','vehicle.max_steer'))
         if len(r.auxiliary_points) > 40:
-            raise ProjectError("辅助点最多 40 个。")
+            raise ProjectError("辅助点最多 40 个。",fields=('route.auxiliary_points',))
         segments = len(effective)-1
         for segment,x,y in r.auxiliary_points:
             if int(segment)!=segment or not 0 <= segment < segments:
-                raise ProjectError("辅助点的比赛段编号无效；起点不同于首个必过点时包含起点连接段。")
+                raise ProjectError("辅助点的比赛段编号无效；起点不同于首个必过点时包含起点连接段。",fields=('route.auxiliary_points',))
             if not bounds[0] <= x <= bounds[1] or not bounds[2] <= y <= bounds[3]:
-                raise ProjectError("辅助点坐标必须在当前场地内。")
+                raise ProjectError("辅助点坐标必须在当前场地内。",fields=('route.auxiliary_points',))
     except (TypeError, ValueError, OverflowError) as exc:
         if isinstance(exc, ProjectError):
             raise
@@ -136,7 +136,7 @@ def _initial_heading(p: Project) -> float:
         return math.radians(p.route.heading)
     target = np.asarray(p.route.waypoints[1]) - [p.route.start_x, p.route.start_y]
     if np.linalg.norm(target) < 1e-9:
-        raise ProjectError("默认方向无法确定，请填写起跑方向角。")
+        raise ProjectError("默认方向无法确定，请填写起跑方向角。",fields=('route.heading','route.waypoints'))
     return float(np.arctan2(target[1], target[0]))
 
 
@@ -175,7 +175,7 @@ def _motion(path: Array, p: Project, cancelled: Callable[[], bool] | None = None
         rear_step = float(D @ [math.cos(mid), math.sin(mid)])*factor+v.sensor_y*change
         drive_step = rear_step-drive_y*change
         if rear_step <= 1e-7 or drive_step <= 1e-7:
-            raise ProjectError("路线需要倒行或驱动轮反转，本版只支持前进；请增加转弯空间并检查起跑朝向。")
+            raise ProjectError("路线需要倒行或驱动轮反转，本版只支持前进；请增加转弯空间并检查起跑朝向。",fields=('route.heading','route.waypoints'))
         heading[i+1] = theta+change
         rear_s[i+1] = rear_s[i]+rear_step
         drive_s[i+1] = drive_s[i]+drive_step
@@ -317,7 +317,7 @@ def follower_positions(delta: Array, p: Project) -> tuple[Array, Array, Array]:
     radius0 = c.base_radius+c.neutral_lift+m.roller
     neutral_x = m.offset if m.kind == "flat" else m.pivot_x+m.arm*math.cos(angle0)
     if abs(neutral_x) >= radius0:
-        raise ProjectError("接触中位横坐标超出中位半径；增大基圆或调整偏置/转轴位置。")
+        raise ProjectError("接触中位横坐标超出中位半径；增大基圆或调整偏置/转轴位置。",fields=('cam.base_radius','cam.neutral_lift','mechanism.pivot_x')+(('mechanism.offset',) if m.kind=='flat' else ()))
     neutral_y = math.sqrt(radius0**2-neutral_x**2)
     if m.kind == "flat":
         pin_x = m.pivot_x+m.arm*np.cos(angle)
@@ -325,7 +325,7 @@ def follower_positions(delta: Array, p: Project) -> tuple[Array, Array, Array]:
         root = m.link**2-pin_x**2
         root0 = m.link**2-(m.pivot_x+m.arm*math.cos(angle0))**2
         if root0 <= 0 or np.any(root <= 0.01):
-            raise ProjectError("平推连杆无法闭合或接近死点；检查连杆长、转轴横距和转向臂尺寸。")
+            raise ProjectError("平推连杆无法闭合或接近死点；检查连杆长、转轴横距和转向臂尺寸。",fields=('mechanism.link','mechanism.pivot_x','mechanism.arm','mechanism.arm_angle'))
         y0 = m.arm*math.sin(angle0)+m.branch*math.sqrt(root0)
         stroke = pin_y+m.branch*np.sqrt(root)-y0
         centers = np.column_stack([np.full(len(delta), m.offset), neutral_y+stroke])
@@ -443,7 +443,7 @@ def _cam(result: Result, cancelled: Callable[[], bool] | None = None) -> None:
     tangent = (np.roll(pitch, -1, axis=0)-np.roll(pitch, 1, axis=0))/2
     speed = np.linalg.norm(tangent, axis=1)
     if np.min(speed) < 1e-8:
-        raise ProjectError("凸轮理论轮廓出现尖点；调整基圆、机构或路线。")
+        raise ProjectError("凸轮理论轮廓出现尖点；调整基圆、机构或路线。",fields=('cam.base_radius','mechanism.arm','mechanism.arm_angle','route.waypoints'))
     orientation = 1 if np.sum(pitch[:, 0]*np.roll(pitch[:, 1], -1)-pitch[:, 1]*np.roll(pitch[:, 0], -1)) > 0 else -1
     outward = orientation*np.column_stack([tangent[:, 1], -tangent[:, 0]])/speed[:, None]
     profile = pitch-m.roller*outward

@@ -10,6 +10,7 @@ from .auxiliary_search import SearchSettings, SearchOutcome, search_auxiliaries
 from .project import ProjectError
 from .auxiliary_editor import AuxiliaryEditor
 from .route_shape import required_nodes
+from .workflow import candidate_explanation
 if TYPE_CHECKING:
     from .ui import App
 
@@ -45,6 +46,7 @@ class AuxiliaryControls:
         scroll=ttk.Scrollbar(summary_frame,command=summary_text.yview)
         summary_text.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right",fill="y"); summary_text.pack(fill="x",expand=True)
+        compare.bind("<Configure>",lambda e:summary_text.configure(height=1 if e.height<450 else 2) if e.widget==compare else None,add="+")
         def update_summary(*args: Any) -> None:
             summary_text.configure(state="normal");summary_text.delete("1.0","end")
             summary_text.insert("1.0",self.summary.get());summary_text.configure(state="disabled")
@@ -81,7 +83,7 @@ class AuxiliaryControls:
         self.editor.undo(redo)
 
     def start(self) -> None:
-        if self.busy or self.app.busy or not self.app.ensure_editors_idle(): return
+        if self.busy or self.app.busy or self.app.improvement.busy or not self.app.ensure_editors_idle(): return
         try:
             p=self.app.collect(); values: dict[str,Any]={k:float(v.get()) for k,v in self.settings.items()}
             settings=SearchSettings(**values); settings.validate(len(required_nodes(p))-1)
@@ -111,7 +113,7 @@ class AuxiliaryControls:
                     self.outcome=value
                     self.app.workbench.set_comparison(value.original,value.candidate,original_project=value.original_project)
                     coords="；".join(f"段{int(s)+1} ({x:.1f},{y:.1f})" for s,x,y in value.candidate.project.route.auxiliary_points) or "无辅助点"
-                    self.summary.set(value.status+" 辅助坐标："+coords)
+                    self.summary.set(value.status+"\n"+candidate_explanation(value.original_project,value.candidate)+" 辅助坐标："+coords)
                 else: self.summary.set(value)
         except queue.Empty: pass
         self.app.root.after(100,self.poll)

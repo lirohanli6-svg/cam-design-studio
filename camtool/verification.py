@@ -650,7 +650,7 @@ def load_nominal_csv(path: Path) -> Array:
 
 def verification_report(result: VerificationResult) -> str:
     rows = [f"# 独立二次检验报告 · 软件 {VERSION}", "", f"- 生成时间（UTC）：{result.timestamp}",
-            f"- 被检文件：{result.filename}", f"- SHA-256：{result.sha256}",
+            f"- 被检文件：{Path(result.filename).name}", f"- SHA-256：{result.sha256}",
             "- 输入链：最终 DXF 折线 → 全局无穿透滚子/球接触 → 独立机构反解 → 独立车辆积分。",
             "- 名义转角、motion.csv、cam.csv 未作为运动输入；若提供，仅用于比较。",
             "- 问题位置：接触/行程/转角采用 DXF 局部接触坐标；多解候选明确列出固定机构坐标；打卡/边界/障碍物采用场地坐标。无法接触时没有有效接触位置。",
@@ -674,7 +674,7 @@ def export_verification(result: VerificationResult, folder: Path, *, overwrite: 
         raise ProjectError("目录已有二次检验结果；请选择新目录或明确允许覆盖。")
     folder.mkdir(parents=True, exist_ok=True)
     files["report"].write_text(verification_report(result), encoding="utf-8")
-    snapshot = {"software_version": VERSION, "timestamp": result.timestamp, "filename": result.filename, "sha256": result.sha256,
+    snapshot = {"software_version": VERSION, "timestamp": result.timestamp, "filename": Path(result.filename).name, "sha256": result.sha256,
                 "checks": [asdict(c) for c in result.checks], "issues": result.issues, "checkpoints": result.checkpoints,
                 "metrics": result.metrics, "parameters": result.inputs.to_dict(),
                 "reference_comparison_only": result.reference.tolist(), "nominal_comparison_only": result.nominal.tolist()}

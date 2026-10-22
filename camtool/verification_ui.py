@@ -204,6 +204,7 @@ class VerificationPage:
         if self.loading:
             return
         self.revision += 1
+        self.cancel.set()
         self.result = None
         self.export_button.configure(state="disabled")
         self.message.set("输入已改变；旧二次检验结果失效，请重新检验。")
@@ -322,7 +323,7 @@ class VerificationPage:
         if path:
             try:
                 self.nominal = load_nominal_csv(Path(path))
-                self.nominal_source = str(Path(path).resolve())+"（仅比较，数据将写入报告快照）"
+                self.nominal_source = Path(path).name+"（仅比较，数据将写入报告快照）"
                 self.changed()
                 self.message.set("已读入名义 CSV，仅用于转角比较，不驱动接触和轨迹。")
             except (ProjectError, OSError, ValueError) as exc:
@@ -348,11 +349,12 @@ class VerificationPage:
         self.message.set("正在从 DXF 求接触；将执行粗细两次整圈检查，随后仅积分计划运行段。")
         revision = self.revision
         reference, nominal = copy.deepcopy(self.reference), copy.deepcopy(self.nominal)
+        reference_source, nominal_source = self.reference_source, self.nominal_source
         def worker() -> None:
             try:
                 result = verify_dxf(path, q, reference=reference, nominal=nominal, cancelled=self.cancel.is_set,
                                     progress=lambda text: self.events.put(("progress", text)))
-                result.metrics.update(reference_source=self.reference_source, nominal_source=self.nominal_source)
+                result.metrics.update(reference_source=reference_source, nominal_source=nominal_source)
                 self.events.put(("result", (revision, result)))
             except Exception as exc:
                 self.events.put(("error", str(exc)))
@@ -363,16 +365,20 @@ class VerificationPage:
             while True:
                 event, value = self.events.get_nowait()
                 if event == "progress":
-                    self.message.set(value)
+                    if not self.cancel.is_set():
+                        self.message.set(value)
                 else:
                     self.busy = False
                     self.run_button.configure(state="normal")
                     if event == "error":
                         self.message.set(value)
-                        messagebox.showerror("二次检验提示", value, parent=self.parent)
+                        if not self.cancel.is_set():
+                            messagebox.showerror("二次检验提示", value, parent=self.parent)
                     else:
                         revision, result = value
-                        if revision != self.revision:
+                        if self.cancel.is_set():
+                            self.message.set("二次检验已停止；未采用后台结果，请重新检验。")
+                        elif revision != self.revision:
                             self.message.set("检验过程中参数已修改，结果已丢弃，请重新检验。")
                         else:
                             self.show_result(result)

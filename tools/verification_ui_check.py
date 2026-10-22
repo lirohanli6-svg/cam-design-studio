@@ -15,7 +15,7 @@ from camtool import calculate, export_design
 from camtool.ui import App, prepare_display
 from camtool.version import VERSION
 
-output=ROOT/'build'/'visual-qa'/f'verification-v{VERSION}'
+output=Path(sys.argv[1]) if len(sys.argv)>1 else ROOT/'build'/'visual-qa'/f'verification-v{VERSION}'
 output.mkdir(parents=True,exist_ok=True)
 prepare_display()
 root=tk.Tk()
@@ -83,7 +83,7 @@ try:
         page.cancel.set()
         pump_until_idle(page)
         assert page.result is None
-        assert any('停止' in str(e) for e in errors),errors
+        assert not errors and '停止' in page.message.get(),(errors,page.message.get())
         errors.clear()
         app.views.select(0)
         root.update()

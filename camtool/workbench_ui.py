@@ -21,6 +21,7 @@ from .plotting import Plot
 from .project import ProjectError
 from .project import Project
 from .version import VERSION
+from .workflow import candidate_explanation
 from .workbench import (TRACK_TEMPLATE, Diagnostic, PlanComparison, cam_degrees, comparison_metrics, demo_project,
                         diagnostics, index_at_time, ordered_deviations, perturbation_analysis,
                         read_measured_track, time_axis)
@@ -51,6 +52,7 @@ class WorkbenchPages:
         self.updating=False
         self.time=tk.DoubleVar(value=0)
         self.demo_status=tk.StringVar(value="载入案例或计算项目后，使用统一理论时间轴。")
+        self.case_info=tk.StringVar(value="来源：内置 demo_project()，确定性理论输入；不是用户方案或实测数据。\n用途：正常案例展示设计与最终 DXF 检验；问题案例主动收紧限值并加入障碍，仅用于展示诊断。验证状态以本次计算为准。")
         self.compare_status=tk.StringVar(value="点击「本地优化」，原方案将被保留，不会自动采用优化方案。")
         self.analysis_status=tk.StringVar(value="用户导入轨迹与理论扰动分别显示；软件不生成实测数据。")
         self.analysis_cancel=threading.Event()
@@ -88,7 +90,7 @@ class WorkbenchPages:
             ttk.Button(row,text=text,command=command,width=14).pack(side="left",padx=2)
         ttk.Label(row,text="倍率").pack(side="left",padx=(10,2))
         ttk.Combobox(row,textvariable=self.app.playback_rate,values=["0.5","1","2","5"],width=5,state="readonly").pack(side="left")
-        ttk.Label(page,text="理论几何运动演示，非实车试验；三个视图共享同一时刻。案例是参数化设计示例，不是实测数据。",padding=(8,3)).pack(fill="x")
+        ttk.Label(page,textvariable=self.case_info,padding=(8,3),wraplength=1120).pack(fill="x")
         ttk.Label(page,textvariable=self.demo_status,padding=6,wraplength=940).pack(side="bottom",fill="x")
         self.demo_slider=ttk.Scale(page,from_=0,to=1,variable=self.time,command=self.seek)
         self.demo_slider.pack(side="bottom",fill="x",padx=12,pady=6)
@@ -113,8 +115,17 @@ class WorkbenchPages:
         bar.pack(side="right",fill="y"); self.issue_tree.pack(fill="both",expand=True)
         self.issue_tree.tag_configure("fail",foreground="#b3263d")
         self.issue_tree.bind("<<TreeviewSelect>>",self.choose_issue)
-        self.issue_detail=tk.Text(page,height=4,wrap="word",bg="white",state="disabled",padx=8,pady=5)
-        self.issue_detail.pack(fill="x")
+        detail=ttk.Frame(page); detail.pack(fill="x")
+        self.issue_detail=tk.Text(detail,height=4,wrap="word",bg="white",state="disabled",padx=8,pady=5)
+        detail_scroll=ttk.Scrollbar(detail,command=self.issue_detail.yview)
+        self.issue_detail.configure(yscrollcommand=detail_scroll.set)
+        detail_scroll.pack(side="right",fill="y"); self.issue_detail.pack(fill="both",expand=True)
+        def resize_issues(event: Any) -> None:
+            if event.widget==page:
+                small=event.height<480
+                self.issue_tree.configure(height=3 if small else 5)
+                self.issue_detail.configure(height=3 if small else 4)
+        page.bind("<Configure>",resize_issues,add="+")
         grid=ttk.Frame(page); grid.pack(fill="both",expand=True)
         for i,key in enumerate(["issue_route","issue_cam","issue_curve"]):
             grid.columnconfigure(i,weight=1)
@@ -127,7 +138,16 @@ class WorkbenchPages:
         for text,command in [("运行本地优化",lambda:self.app.run(True)),("保留原方案",lambda:self.adopt(False)),
                              ("采用优化方案",lambda:self.adopt(True)),("保存两套方案与对比",self.export_comparison)]:
             ttk.Button(row,text=text,command=command,width=20,style="Compact.TButton").pack(side="left",padx=2)
-        ttk.Label(page,textvariable=self.compare_status,wraplength=1200,padding=6).pack(side="bottom",fill="x")
+        detail=ttk.Frame(page,padding=(6,2)); detail.pack(side="bottom",fill="x")
+        self.compare_detail=tk.Text(detail,height=2,wrap="word",font=("Microsoft YaHei UI",9),
+                                    relief="flat",background="#edf2f8",state="disabled")
+        detail_scroll=ttk.Scrollbar(detail,command=self.compare_detail.yview)
+        self.compare_detail.configure(yscrollcommand=detail_scroll.set)
+        detail_scroll.pack(side="right",fill="y"); self.compare_detail.pack(fill="x",expand=True)
+        def update_detail(*args: Any) -> None:
+            self.compare_detail.configure(state="normal"); self.compare_detail.delete("1.0","end")
+            self.compare_detail.insert("1.0",self.compare_status.get()); self.compare_detail.configure(state="disabled")
+        self.compare_status.trace_add("write",update_detail); update_detail()
         compare_table=ttk.Frame(page)
         compare_table.pack(fill="x")
         self.compare_tree=ttk.Treeview(compare_table,columns=("metric","before","after","change"),show="headings",height=5)
@@ -138,7 +158,11 @@ class WorkbenchPages:
         self.compare_tree.configure(yscrollcommand=scrollbar.set,height=2)
         scrollbar.pack(side="right",fill="y")
         self.compare_tree.pack(fill="x",expand=True)
-        page.bind("<Configure>",lambda e:self.compare_tree.configure(height=4 if e.height>500 else 2),add="+")
+        def resize_compare(event: Any) -> None:
+            if event.widget==page:
+                self.compare_tree.configure(height=4 if event.height>500 else (1 if event.height<450 else 2))
+                self.compare_detail.configure(height=1 if event.height<450 else 2)
+        page.bind("<Configure>",resize_compare,add="+")
         self.canvas(page,"compare").pack(fill="both",expand=True)
 
     def _analysis(self) -> None:
@@ -199,11 +223,15 @@ class WorkbenchPages:
 
     def load_case(self,problem: bool) -> None:
         if not self.app.ensure_editors_idle(): return
-        if self.app.busy: return
+        if self.app.busy or self.app.auxiliary.busy or self.app.improvement.busy: return
         try:
             if self.backup is None:
                 self.backup={"project":self.app.collect(),"result":self.app.result,"file":self.app.file,"dirty":self.app.dirty,"source":self.app.parameter_source.get()}
-            self.app.load(demo_project(problem)); self.app.file=None
+            project=demo_project(problem)
+            self.app.load(project); self.app.file=None
+            self.case_info.set(f"来源：内置 demo_project(problem={problem})；用途：{'超限与障碍问题定位' if problem else '理论设计及最终 DXF 检验'}。\n"
+                               f"轴距 {project.vehicle.wheelbase:g} mm；前轮限位 ±{project.vehicle.max_steer:g}°；压力角门槛 {project.cam.pressure_limit:g}°；打卡容差 {project.route.tolerance:g} mm。"
+                               f"路线步长 {project.route.step:g} mm / 凸轮起始 {project.cam.points:g} 点。未实测；本次验证见顶部状态，修改后须重算。返回原项目恢复快照。")
             self.demo_status.set("正在后台计算案例；可点工具栏「停止计算」。")
             self.app.views.select(self.frames["demo"])
             self.app.run(False)
@@ -227,7 +255,7 @@ class WorkbenchPages:
         if d.route_index is not None: self.app.frame.set(d.route_index)
         self.app.show_figure_angle(d.angle_deg)
         self.issue_detail.configure(state="normal"); self.issue_detail.delete("1.0","end")
-        self.issue_detail.insert("1.0",f"{d.name}｜实际：{d.actual}｜限制：{d.limit}\n{d.scope}；凸轮角：{d.angle_deg}°；场地位置：{d.point}\n依据：{d.basis}\n建议：{d.advice}（修改后须重新检查，不保证通过。）")
+        self.issue_detail.insert("1.0",f"{d.name}｜实际：{d.actual}｜限制：{d.limit}\n{d.scope}；凸轮角：{d.angle_deg}°；场地位置 mm：{d.point}\n依据：{d.basis}\n超限影响：{d.impact}\n建议：{d.advice}（修改后须重新检查，不保证通过。）")
         self.issue_detail.configure(state="disabled")
         self.render_issues()
 
@@ -242,13 +270,14 @@ class WorkbenchPages:
             after=b[key]
             delta=None if value is None or after is None else after-value
             self.compare_tree.insert("","end",values=(key,"未生成" if value is None else f"{value:.5f}","未生成" if after is None else f"{after:.5f}","不可比较" if delta is None else f"{delta:+.5f}"))
-        self.compare_status.set(self.comparison.verdict()+" 原方案已保留在内存，可保存两套项目。")
+        self.compare_status.set(self.comparison.verdict()+" 原方案已保留在内存，可保存两套项目。\n"+
+                                candidate_explanation(self.comparison.original_project,optimized))
         self.app.views.select(self.frames["compare"])
         self.render_compare()
 
     def adopt(self,optimized: bool) -> None:
         if not self.app.ensure_editors_idle(): return
-        if self.comparison is None or self.app.busy: return
+        if self.comparison is None or self.app.busy or self.app.improvement.busy: return
         result=copy.deepcopy(self.comparison.optimized if optimized else self.comparison.original)
         self.adopting=True
         try:
@@ -435,6 +464,9 @@ class WorkbenchPages:
                 elif kind=="error": self.analysis_status.set(value)
                 else:
                     revision,data=value
+                    if self.analysis_cancel.is_set():
+                        self.analysis_status.set("分析已停止；未采用后台结果。")
+                        continue
                     if revision!=self.app.revision:
                         self.analysis_status.set("设计已更改，后台分析结果已丢弃。")
                         continue

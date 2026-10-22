@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import csv
 import math
+import os
+import shutil
+import tempfile
 from pathlib import Path
+from typing import Callable
 
 import ezdxf
 import numpy as np
@@ -71,16 +75,70 @@ def report_text(result: Result) -> str:
     return "\n".join(rows)+"\n"
 
 
-def export_design(result: Result, folder: Path, *, overwrite: bool = False) -> dict[str, Path]:
+def export_design(result: Result, folder: Path, *, overwrite: bool = False,
+                  cancelled: Callable[[], bool] | None = None) -> dict[str, Path]:
+    """Stage the whole set and restore originals on ordinary IO/cancel errors.
+
+    Five file replacements are not a power-loss transaction. Retain backups
+    for manual recovery if rollback itself encounters an IO failure.
+    """
     if not len(result.profile) or not np.isfinite(result.profile).all():
         raise ProjectError("当前结果没有有效轮廓，不能导出；请先调整参数重新计算。")
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
+    names = ("cam.dxf", "motion.csv", "cam.csv", "检查报告.md", "project.cam.json")
+    def stop() -> None:
+        if cancelled and cancelled():
+            raise ProjectError("导出已停止；已有结果未替换或已恢复。")
+    stop()
+    if not overwrite and any((folder/name).exists() for name in names):
+        raise ProjectError("导出目录已有同名结果，请选择新目录或明确允许覆盖。")
+    stage = Path(tempfile.mkdtemp(prefix=".solarcam-export-", dir=folder))
+    keep_backup = False
+    replaced: list[Path] = []
+    try:
+        staged = _write_design(result, stage)
+        stop()
+        backup = stage/"backup"
+        backup.mkdir()
+        for name in names:
+            target = folder/name
+            if target.exists():
+                if not overwrite:
+                    raise ProjectError("导出期间出现同名文件，请重新选择目录。")
+                if not target.is_file():
+                    raise ProjectError(f"目标 {name} 不是文件，请选择其他目录。")
+                shutil.copy2(target, backup/name)
+        try:
+            for name in names:
+                stop()
+                target = folder/name
+                os.replace(stage/name, target)
+                replaced.append(target)
+        except (OSError, ProjectError):
+            for target in reversed(replaced):
+                try:
+                    saved = backup/target.name
+                    if saved.exists():
+                        os.replace(saved, target)
+                    else:
+                        target.unlink()
+                except OSError:
+                    keep_backup = True
+            if keep_backup:
+                raise ProjectError(f"导出及回滚失败；请停止使用该目录，从 {backup} 恢复原文件后重试。")
+            raise
+        return {key: folder/path.name for key, path in staged.items()}
+    finally:
+        if not keep_backup:
+            shutil.rmtree(stage, ignore_errors=True)
+
+
+def _write_design(result: Result, folder: Path) -> dict[str, Path]:
+    """Write only to a private staging directory, without touching originals."""
     files = {"dxf": folder/"cam.dxf", "motion_csv": folder/"motion.csv",
              "cam_csv": folder/"cam.csv", "report": folder/"检查报告.md",
              "project": folder/"project.cam.json"}
-    if not overwrite and any(path.exists() for path in files.values()):
-        raise ProjectError("导出目录已有同名结果，请选择新目录或明确允许覆盖。")
     p = result.project
     with files["motion_csv"].open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.writer(stream)

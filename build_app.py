@@ -49,6 +49,8 @@ def populate(folder: Path) -> None:
     cases=folder/'可复现理论案例'; cases.mkdir(exist_ok=True)
     demo_project().save(cases/'正常方案.cam.json')
     demo_project(True).save(cases/'问题方案.cam.json')
+    assistant_case=demo_project(); assistant_case.cam.base_radius=25
+    assistant_case.save(cases/'改进助手_压力角理论案例.cam.json')
     shutil.copytree(ROOT/'examples/辅助点理论案例',cases/'辅助点理论案例',dirs_exist_ok=True)
     (folder/'实测轨迹格式模板_无采样点.csv').write_text(TRACK_TEMPLATE,encoding='utf-8-sig')
     docs = {'README.md':'使用说明.md','CHANGELOG.md':'CHANGELOG.md','docs/MODEL.md':'计算模型与验证.md',
@@ -63,6 +65,9 @@ def populate(folder: Path) -> None:
             'docs/REQUIRED_POINTS.md':'必过点与回算偏差说明.md',
             'docs/POINT_EDITING.md':'打卡点与辅助点编辑说明.md',
             'docs/VIEW_CONTROLS.md':'缩放平移与拖动说明.md',
+            'docs/IMPROVEMENT_ASSISTANT.md':'设计改进助手操作说明.md',
+            'docs/WORKBENCH_VALIDATION_v1.7.0.md':'功能历史验证记录_v1.7.0.md',
+            'docs/WORKBENCH_VALIDATION_v1.8.0.md':'功能历史验证记录_v1.8.0.md',
             'docs/WORKBENCH_VALIDATION_v1.6.0.md':'功能历史验证记录_v1.6.0.md',
             'docs/WORKBENCH_VALIDATION_v1.5.1.md':'功能历史验证记录_v1.5.1.md',
             'examples/waypoints.csv':'打卡点示例.csv'}
@@ -73,8 +78,13 @@ def populate(folder: Path) -> None:
     (folder/'先看这里_启动说明.txt').write_text(f'''{APP_NAME} {VERSION}
 发布日期：{RELEASE_DATE}
 
-请完整解压 ZIP，再双击同目录的 SolarCam.exe。适用于 64 位 Windows；无需 Python、MATLAB 或 API 密钥，可离线使用。
-_internal 是全部运行依赖，licenses 是许可证；保留整个文件夹结构。分享时发送整个 ZIP，不要只发 exe。
+完整保留此文件夹，双击同目录的 SolarCam.exe。如收到ZIP请先完整解压。适用于 64 位 Windows；无需 Python、MATLAB 或 API 密钥，可离线使用。
+_internal 是全部运行依赖，licenses 是许可证；保留整个文件夹结构。移动或分享时保留整个文件夹，不要只复制exe。
+
+新功能：检查报告 → 设计改进助手（或顶栏改进助手），打开自动诊断当前输入，无需先勾选参数。先读已确认事实、待验证原因和相关部件。
+体验：打开“可复现理论案例/改进助手_压力角理论案例.cam.json” → 改进助手 → 当前问题与可能原因 → 确认可改部件：允许凸轮尺寸修改，并明确允许中位高度/安装坐标联动 → 确认授权 → 开始实际试算 → 查看候选及完整检查 → 显式采用或保留原案。默认范围只用于探索，不是机械安全范围；高级页可细调范围与预算。
+保存：采用候选只产生未保存草稿；点击另存为选择您自己的目录。导出方案选择新的空目录，包含实际审计DXF与哈希。不覆盖案例或原项目。
+边界：有限采样的二维理论模型；独立检验通过不等于加工放行或实车通过。详见设计改进助手操作说明.md。
 
 设计：打开项目 / 演示项目 → 核对实车参数 → 计算设计 → 导出最终 cam.dxf。
 界面：所有功能页签统一位于顶部一排；“同步演示 / 问题定位 / 优化对比 / 实测与扰动”各保留一处入口。点“场地与试跑”返回设计输入。
@@ -122,6 +132,14 @@ _internal 是全部运行依赖，licenses 是许可证；保留整个文件夹�
     (licenses/'阅读说明.txt').write_text('Python.txt 包含 Python 及其随附 Tcl/Tk 等组件的原文条款。各依赖的目录保留许可证原相对路径，避免多个同名 LICENSE 相互覆盖。NumPy 及其捆绑组件原文也随 _internal/numpy-*.dist-info/licenses 提供。PyInstaller 引导程序例外条款见 pyinstaller 目录。',encoding='utf-8-sig')
 
 
+def copy_release_folder(source: Path) -> Path:
+    folder=ROOT.parent/f'太阳能小车凸轮设计工作台_v{VERSION}'
+    if folder.exists() or folder.with_name(folder.name+'.zip').exists():
+        raise RuntimeError(f'保留已有交付，拒绝覆盖：{folder}')
+    shutil.copytree(source,folder)
+    return folder
+
+
 def package_release(source: Path) -> tuple[Path,Path]:
     folder=ROOT.parent/f'太阳能小车凸轮设计工作台_v{VERSION}'
     archive=folder.parent/(folder.name+'.zip')
@@ -138,7 +156,9 @@ def package_release(source: Path) -> tuple[Path,Path]:
 
 def main() -> None:
     parser=argparse.ArgumentParser()
-    parser.add_argument('--package',action='store_true',help='额外创建完整分享文件夹及 ZIP，不覆盖旧包')
+    delivery=parser.add_mutually_exclusive_group()
+    delivery.add_argument('--package',action='store_true',help='额外创建完整分享文件夹及 ZIP，不覆盖旧包')
+    delivery.add_argument('--folder-only',action='store_true',help='只创建独立运行文件夹，不生成ZIP或上传')
     args=parser.parse_args()
     configure_tcl_runtime()
     destination=ROOT/'dist'/f'v{VERSION}'
@@ -156,6 +176,7 @@ StringStruct('OriginalFilename','SolarCam.exe')])]),VarFileInfo([VarStruct('Tran
     folder=destination/'SolarCam'; populate(folder)
     print(f'Ready {VERSION}: {folder/"SolarCam.exe"}')
     if args.package: print(package_release(folder))
+    elif args.folder_only: print(copy_release_folder(folder))
 
 
 if __name__=='__main__': main()

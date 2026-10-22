@@ -15,7 +15,7 @@ from camtool import Project,calculate
 from camtool.ui import App,prepare_display
 from camtool.auxiliary_search import search_auxiliaries,SearchSettings
 from camtool.version import VERSION
-out=ROOT/'build/visual-qa'/f'auxiliary-v{VERSION}';out.mkdir(parents=True,exist_ok=True)
+out=Path(sys.argv[1]) if len(sys.argv)>1 else ROOT/'build/visual-qa'/f'auxiliary-v{VERSION}';out.mkdir(parents=True,exist_ok=True)
 prepare_display();root=tk.Tk();app=App(root);aux=app.auxiliary
 errors=[];checks={};root.report_callback_exception=lambda *args:errors.append(str(args))
 

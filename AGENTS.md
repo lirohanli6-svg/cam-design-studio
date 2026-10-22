@@ -17,10 +17,12 @@ Windows 离线桌面程序；Python 3.12、Tkinter、NumPy、ezdxf；没有服�
 | 路线样条、必过点、辅助点形状 | `route_shape.py`、`route_metrics.py`、`engine.py:_route/_motion/_replay` | `test_auxiliary.py`、`test_required_points.py` |
 | 车辆/机构运动、凸轮、采样、优化 | `engine.py`、`cam_geometry.py` | `test_workflow.py`、`test_safety.py`、`test_required_points.py`；按影响补 `test_auxiliary.py` |
 | 主窗口、后台任务、结果失效 | `ui.py` | 按功能选单元测试及 `tools/ui_check.py` |
+| 顶部流程/四层状态、路演案例、候选解释与可靠导出 | `workflow.py`、`ui.py`、`workbench.py`、`workbench_ui.py`、`export.py` | `test_readiness.py`；`tools/readiness_ui_check.py`；评分/路演见 `docs/HACKATHON_READINESS.md` |
 | 打卡点表格、坐标草稿、历史 | `waypoints.py`、`ui.py`、`workbench.py:RouteHistory` | `test_waypoints.py`；`tools/editing_ui_check.py` |
 | 辅助点编辑与地图联动 | `auxiliary_editor.py`、`auxiliary_ui.py`、`ui.py` | `test_auxiliary_editor.py`；`tools/auxiliary_ui_check.py` |
 | 两类点表统一验收 | `editor_smoke.py`（被显式冒烟入口调用） | `tools/dual_point_ui_check.py`，配合两类编辑单元测试 |
 | 辅助搜索、排名、候选独立审计 | `auxiliary_search.py`、`candidate_audit.py`、`auxiliary_ui.py` | `test_auxiliary.py`；`tools/auxiliary_ui_check.py` |
+| 设计改进助手、参数授权、结构试算、候选采用/撤销 | `improvement.py`、`improvement_ui.py`；`ui.py` 生命周期 | `test_improvement.py`、`test_improvement_diagnosis.py`；`tools/diagnosis_ui_check.py`、`tools/improvement_ui_check.py`；说明 `docs/IMPROVEMENT_ASSISTANT.md` |
 | 绘图、尺寸、起点/旋向标记 | `plotting.py`、`dimensions.py`、`markings.py` | `test_cam_markings.py` 及相关界面检查 |
 | 主图/放大窗口缩放、平移、保留绘制和拖动性能 | `viewport.py`、`plot_views.py`、`ui.py:map_* / flush_drag / render`；`plotting.py:Plot` | `test_viewport.py`；`tools/views_ui_check.py`、`tools/drag_probe.py` |
 | DXF/CSV/报告导出 | `export.py`、`markings.py`、`project_validation.py` | `test_workflow.py`、`test_cam_markings.py`、`test_required_points.py` |
@@ -34,7 +36,10 @@ Windows 离线桌面程序；Python 3.12、Tkinter、NumPy、ezdxf；没有服�
 - `main.py → ui.App`；界面编排计算、编辑器、绘图和各结果页。搜索后台由 `auxiliary_ui.py` 编排。
 - `ui → plot_views → plotting/viewport` 是主图/放大窗口的运行依赖；`plotting.Plot` 仅对带相机的Canvas使用显示变换。`view_smoke` 在显式冒烟入口延迟导入，常规启动不运行鼠标/验收动作。
 - `engine → project / route_shape / route_metrics / cam_geometry`，生成 `Result`；`export → Result / markings / version` 输出交付文件。
+- `workflow` 只汇总状态与参数变化，由界面和辅助搜索复用；不调用求解器。顶部 DXF 结论绑定当前导出哈希、项目和计划区间，不替代独立参数核对。验收脚本可显式传输出目录，不覆盖历史发布证据。
 - `engine.optimize`、辅助搜索和 `project_validation` 经 `candidate_audit → export → 最终DXF → verification` 审计候选。此链有函数内延迟导入，修改 import 时核对循环依赖。
+- `Diagnostic.measurements/pose` 从当前计算数组生成行程跨度/两端越界/姿态；`improvement.diagnose` 区分事实与依赖假设，不解析中文报告判根因。助手默认诊断页后台计算/整理，无授权也可看；部件授权后复用原试算。结构试算须明确允许隐含安装位置联动。`ProjectError.fields` 可选字段键用于输入定位，保留原异常类型。
+- `improvement → engine / auxiliary_search.rank / workbench.diagnostics / candidate_audit` 复用数值与独立审计；变量只在注册允许列表内，未授权字段、采样和验收门槛逐字段不变。`improvement_ui` 后台队列只传数据；预览不修改项目，采用历史复用RouteHistory快照并保留点表历史。当前输入改变时使助手候选/采用历史失效。
 - `verification` 的运动计算只依赖项目数据、版本和 NumPy/ezdxf，自行从轮廓求接触、转角和轨迹；不得改为调用主生成引擎来证明自己正确。`reference`/名义 CSV 只用于比较。
 - `workbench → Result / route_metrics`，扰动分析在函数内调用独立检验。`waypoints → workbench.RouteHistory`；`auxiliary_editor` 复用点表基类，但必须维护各自的坐标和历史。
 - `tests/` 是单元与工作流测试，`tools/` 是真实界面、案例与发布验证脚本，`examples/` 与 `tests/fixtures/` 是明确来源的输入；`docs/` 为按需阅读的模型/操作/验证记录。

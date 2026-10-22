@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import ctypes
+import hashlib
 import math
 import json
 import queue
@@ -27,6 +28,8 @@ from .workbench_ui import WorkbenchPages, prepare_views
 from .dimensions import draw_dimensions
 from .auxiliary_ui import AuxiliaryControls
 from .plot_views import FigurePanel,RetainedCanvas
+from .workflow import workflow_state
+from .improvement_ui import ImprovementPage
 
 
 def prepare_display() -> None:
@@ -61,6 +64,12 @@ class App:
         self.dirty = False
         self.loading = True
         self.busy = False
+        self.task_kind = ""
+        self.export_receipt: tuple[int, Path, str, tuple[int, int]] | None = None
+        self.workflow_signature: tuple = ()
+        self.workflow_check_at = 0.0
+        self.workflow_status = tk.StringVar()
+        self.workflow_step = tk.StringVar()
         self.playing = False
         self.playback_rate = tk.StringVar(value="1")
         self.play_generation = 0
@@ -131,10 +140,10 @@ class App:
         tk.Label(heading, text="路线 → 车辆 → 转向机构 → 凸轮", bg="#172740", fg="#a7bddc").pack(side="right")
         toolbar = ttk.Frame(self.root, padding=(12, 3))
         toolbar.pack(fill="x")
-        actions: list[tuple[str, Callable[[], Any]]] = [("新建", self.new), ("演示项目", self.demo), ("打开", self.open),
+        actions: list[tuple[str, Callable[[], Any]]] = [("新建", self.new), ("示例与路演", lambda:self.show_workbench("demo")), ("打开", self.open),
                                                        ("保存", self.save), ("另存为", lambda: self.save(True))]
         for text, action in actions:
-            ttk.Button(toolbar, text=text, command=action).pack(side="left", padx=2)
+            ttk.Button(toolbar, text=text, command=action, width=11 if text=="示例与路演" else 7).pack(side="left", padx=2)
         self.run_button = ttk.Button(toolbar, text="计算设计", command=lambda: self.run(False), style="Accent.TButton")
         self.run_button.pack(side="left", padx=(18, 3))
         self.optimize_button = ttk.Button(toolbar, text="本地优化", command=lambda: self.run(True))
@@ -149,6 +158,17 @@ class App:
         ttk.Entry(details, textvariable=self.name, width=35).pack(side="left", padx=8)
         ttk.Checkbutton(details, text="演示项目（须替换实车尺寸）", variable=self.is_demo).pack(side="left", padx=10)
         ttk.Button(details, text=f"版本与更新日志 {VERSION}", command=self.show_version, width=24).pack(side="right")
+        workflow = ttk.Frame(self.root, padding=(16, 2))
+        workflow.pack(fill="x")
+        labels = ttk.Frame(workflow)
+        state_label = ttk.Label(labels, textvariable=self.workflow_status, wraplength=1000)
+        state_label.pack(anchor="w")
+        step_label = ttk.Label(labels, textvariable=self.workflow_step, foreground="#546784", wraplength=1000)
+        step_label.pack(anchor="w")
+        self.next_button = ttk.Button(workflow, text="下一步", command=self.next_step, width=18)
+        self.next_button.pack(side="right", padx=4)
+        labels.pack(side="left", fill="x", expand=True)
+        labels.bind("<Configure>", lambda e:[label.configure(wraplength=max(320,e.width-2)) for label in (state_label,step_label)])
         self.navigation = ttk.Notebook(self.root, height=1, style="Navigation.TNotebook")
         self.navigation.pack(fill="x", padx=12, pady=(2,0))
         pane = ttk.Panedwindow(self.root, orient="horizontal")
@@ -189,6 +209,7 @@ class App:
             self.canvases[key] = canvas
         report_page = ttk.Frame(self.views)
         self.views.add(report_page, text="检查报告")
+        ttk.Button(report_page,text="设计改进助手：先看问题 → 确认可改部件 → 试算验证",command=lambda:self.improvement.open(),width=58).pack(anchor="w",padx=5,pady=3)
         self.report_tabs=ttk.Notebook(report_page)
         self.report_tabs.pack(fill="both",expand=True)
         summary_page=ttk.Frame(self.report_tabs)
@@ -220,6 +241,7 @@ class App:
         self.verifier = VerificationPage(self.verification_frame, self.verification_context)
         self.workbench = WorkbenchPages(self)
         self.auxiliary = AuxiliaryControls(self, self.workbench.frames["compare"])
+        self.improvement = ImprovementPage(self)
         self.inputs.bind("<<NotebookTabChanged>>",self.point_page_changed)
         self.map_edit.trace_add("write",self.map_mode_changed)
         self.auxiliary.editor.new_segment.trace_add("write",lambda *args:self.update_map_hint())
@@ -240,7 +262,7 @@ class App:
         self.status_label.pack(side="bottom", fill="x", before=playback)
         def tab_changed(_event: Any) -> None:
             selected = self.views.select()
-            expanded = selected in [str(self.verification_frame), *[str(frame) for frame in self.workbench.frames.values()]]
+            expanded = selected in [str(self.verification_frame), str(self.improvement.frame), *[str(frame) for frame in self.workbench.frames.values()]]
             if expanded:
                 if str(self.inputs) in pane.panes():
                     pane.forget(self.inputs)
@@ -272,6 +294,51 @@ class App:
         nominal = np.column_stack([np.degrees(result.cam_angle), np.degrees(result.cam_delta)])
         return project, reference, nominal, float(result.stats["cam_usage"]*360)
 
+    def refresh_workflow(self) -> None:
+        receipt = self.export_receipt
+        if receipt is not None and time.monotonic() >= self.workflow_check_at:
+            self.workflow_check_at = time.monotonic()+1
+            try:
+                stat = receipt[1].stat()
+                if (stat.st_mtime_ns,stat.st_size) != receipt[3]:
+                    self.export_receipt = None
+            except OSError:
+                self.export_receipt = None
+        receipt = self.export_receipt
+        digest = receipt[2] if receipt is not None and receipt[0] == self.revision else ""
+        signature = (self.revision,id(self.result),digest,id(self.verifier.result),self.busy,
+                     self.auxiliary.busy,self.verifier.busy,self.workbench.analysis_busy,self.improvement.busy,self.task_kind)
+        if signature == self.workflow_signature:
+            return
+        self.workflow_signature = signature
+        state = workflow_state(self.result,digest,self.verifier.result)
+        self.workflow_status.set(state.stages)
+        running = self.task_kind if self.busy else ("设计改进助手（本页可停止）" if self.improvement.busy else ("辅助点搜索" if self.auxiliary.busy else (
+            "最终 DXF 二次检验" if self.verifier.busy else ("实测/扰动分析" if self.workbench.analysis_busy else "")))
+        )
+        self.workflow_step.set(f"正在运行：{running}；可在对应任务处停止。完成前不是本次通过结论。" if running else state.next_step)
+        titles = {"calculate":"计算设计", "issues":"查看问题定位", "export":"导出结果", "verify":"检验本次导出", "limits":"查看落地边界"}
+        self.next_button.configure(text=titles[state.action],state="disabled" if running else "normal")
+
+    def next_step(self) -> None:
+        if self.busy or self.auxiliary.busy or self.verifier.busy or self.workbench.analysis_busy or self.improvement.busy:
+            return
+        receipt = self.export_receipt
+        digest = receipt[2] if receipt is not None and receipt[0] == self.revision else ""
+        action = workflow_state(self.result,digest,self.verifier.result).action
+        if action == "calculate":
+            self.run(False)
+        elif action == "issues":
+            self.show_workbench("issues")
+        elif action == "export":
+            self.export()
+        elif action == "verify" and receipt is not None:
+            self.verifier.file.set(str(receipt[1]))
+            self.verifier.copy_design()
+            self.views.select(self.verification_frame)
+        else:
+            messagebox.showinfo("理论到实物", "理论设计与最终 DXF 检验均不能代替实物验证。\n下一步：核对实际机构和测量参数 → 制造装配 → 低速试跑采集 → 导入实测轨迹比较。\n弹簧、摩擦、驱动力矩、打滑及空间接触尚未验证。", parent=self.root)
+
     def show_version(self) -> None:
         window = tk.Toplevel(self.root)
         window.title(f"版本与更新日志 · {VERSION}")
@@ -291,6 +358,7 @@ class App:
         index=self.navigation.index(self.navigation.select())
         if self.views.index(self.views.select())!=index:
             self.views.select(index)
+        if self.views.select()==str(self.improvement.frame):self.improvement.on_visible()
 
     def parameter_focus(self,key: str,_event: Any = None) -> None:
         self.active_parameter=key
@@ -341,12 +409,14 @@ class App:
 
     def undo_key(self,event: Any) -> str | None:
         if isinstance(event.widget,(tk.Text,tk.Entry,ttk.Entry,ttk.Combobox)): return None
+        if self.views.select()==str(self.improvement.frame):self.improvement.undo();return "break"
         editor=self.keyboard_editor(event.widget)
         if editor is not None: editor.undo(); return "break"
         return None
 
     def redo_key(self,event: Any) -> str | None:
         if isinstance(event.widget,(tk.Text,tk.Entry,ttk.Entry,ttk.Combobox)): return None
+        if self.views.select()==str(self.improvement.frame):self.improvement.undo(True);return "break"
         editor=self.keyboard_editor(event.widget)
         if editor is not None: editor.undo(True); return "break"
         return None
@@ -672,6 +742,7 @@ class App:
         self.dirty = True
         self.revision += 1
         self.result = None
+        self.export_receipt = None
         self.progress_label.configure(text="输入已更改 · 等待重算")
         self.playing = False
         self.play_generation+=1
@@ -680,6 +751,7 @@ class App:
         self.checkpoint_tree.delete(*self.checkpoint_tree.get_children())
         self.checkpoint_status.set("输入已更改或项目已载入，旧逐点结果失效，请重新计算。")
         self.auxiliary.invalidate()
+        self.improvement.invalidate()
         self.scene_plot=None
         self.export_button.configure(state="disabled")
         self.status.set("参数已修改，预览结果已失效；请重新计算后导出。")
@@ -701,6 +773,7 @@ class App:
             self.obstacles.edit_modified(False)
 
     def load(self, project: Project) -> None:
+        self.export_receipt = None
         self.finish_map_gesture()
         for panel in [*self.figure_panels.values(),*[p for _,p in self.figure_windows.values()]]:panel.camera.home=None
         self.pause()
@@ -711,6 +784,7 @@ class App:
         self.checkpoint_tree.delete(*self.checkpoint_tree.get_children())
         self.checkpoint_status.set("输入已更改或项目已载入，旧逐点结果失效，请重新计算。")
         self.auxiliary.invalidate()
+        self.improvement.invalidate()
         self.loading = True
         self.project = copy.deepcopy(project)
         self.name.set(project.name)
@@ -766,7 +840,7 @@ class App:
             try:
                 value = None if key == "route.heading" and not text else self.conversions[key](text)
             except (ValueError, KeyError) as exc:
-                raise ProjectError(f"请检查参数 {key}，输入有效数字或选项。") from exc
+                raise ProjectError(f"请检查参数 {key}，输入有效数字或选项。",fields=(key,)) from exc
             if group == "bounds":
                 if value is None:
                     raise ProjectError("场地边界不能留空。")
@@ -845,7 +919,7 @@ class App:
 
     def run(self, improve: bool) -> None:
         if not self.ensure_editors_idle(): return
-        if self.busy or self.auxiliary.busy:
+        if self.busy or self.auxiliary.busy or self.improvement.busy:
             return
         try:
             project = self.collect()
@@ -855,6 +929,7 @@ class App:
         self._mechanism_controls()
         self.pause()
         self.busy, self.playing = True, False
+        self.task_kind = "本地优化" if improve else "计算设计"
         self.cancel.clear()
         self.run_button.configure(state="disabled")
         self.optimize_button.configure(state="disabled")
@@ -907,6 +982,19 @@ class App:
                         if revision != self.revision:
                             self.status.set("计算期间输入发生变化；结果已丢弃，请重新计算。")
                             continue
+                        if event == "exported":
+                            _,path,digest,stamp=value
+                            if self.cancel.is_set():
+                                self.status.set("导出文件已写入，但任务随后被停止；请核对目录。未将其关联为当前检验对象。")
+                            else:
+                                self.export_receipt=(revision,path,digest,stamp)
+                                self.status.set("五个结果文件已完整导出。点击「检验本次导出」，核对参数与来源后开始独立检验。")
+                            self.export_button.configure(state="normal" if self.result is not None else "disabled")
+                            continue
+                        if self.cancel.is_set():
+                            self.status.set("任务已停止；未采用后台结果，原方案保留。")
+                            self.export_button.configure(state="normal" if self.result is not None and len(self.result.profile) else "disabled")
+                            continue
                         if event=="comparison":
                             _,original,result,ready,project,original_error=value
                             if original is not None: self.show_result(original,ready[0])
@@ -917,6 +1005,7 @@ class App:
                             self.show_result(result,prepared)
         except queue.Empty:
             pass
+        self.refresh_workflow()
         self.root.after(80, self.poll)
 
     def show_result(self, result: Result, prepared: dict[str,Any] | None = None) -> None:
@@ -1009,6 +1098,7 @@ class App:
 
     def export(self) -> None:
         if not self.ensure_editors_idle(): return
+        if self.busy or self.auxiliary.busy or self.improvement.busy: return
         result = self.result
         if result is None:
             return
@@ -1022,8 +1112,20 @@ class App:
                 overwrite = any((folder/name).exists() for name in names)
                 if overwrite and not messagebox.askyesno("同名文件", "此目录已有设计结果。允许覆盖这五个结果文件？", parent=self.root):
                     return
-                export_design(result, folder, overwrite=overwrite)
-                self.status.set(f"已导出到 {folder}：DXF、运动 CSV、轮廓 CSV、报告和项目；装配前请查看报告的出发点与旋向说明。")
+                revision=self.revision
+                self.busy=True; self.task_kind="导出结果"; self.cancel.clear()
+                self.export_receipt=None
+                self.run_button.configure(state="disabled"); self.optimize_button.configure(state="disabled")
+                self.export_button.configure(state="disabled")
+                self.status.set("正在后台生成五个结果文件，完成后替换；可点「停止计算」取消。")
+                def worker() -> None:
+                    try:
+                        files=export_design(result,folder,overwrite=overwrite,cancelled=self.cancel.is_set)
+                        path=files["dxf"]; digest=hashlib.sha256(path.read_bytes()).hexdigest(); stat=path.stat()
+                        self.events.put(("exported",(revision,path,digest,(stat.st_mtime_ns,stat.st_size))))
+                    except Exception as exc:
+                        self.events.put(("error",(revision,str(exc))))
+                threading.Thread(target=worker,daemon=True).start()
             except (OSError, ProjectError) as exc:
                 messagebox.showerror("导出失败", str(exc), parent=self.root)
 
@@ -1031,6 +1133,8 @@ class App:
         if self.may_discard():
             self.cancel.set()
             self.verifier.cancel.set()
+            self.auxiliary.cancel.set()
+            self.improvement.cancel.set()
             self.workbench.analysis_cancel.set()
             self.root.destroy()
 

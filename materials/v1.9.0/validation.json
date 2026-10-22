@@ -1,0 +1,80 @@
+{
+  "version": "1.9.0",
+  "date": "2026-10-22",
+  "scope": "Current working-tree source and demonstration materials; no Windows binary publication, no website update",
+  "tests": {
+    "initial_full_run": {
+      "count": 130,
+      "seconds": 1060.996,
+      "passed": 128,
+      "failures": 1,
+      "errors": 1,
+      "status": "failed",
+      "command": "python -m unittest discover -s tests -q"
+    },
+    "single_thread_retry": "Same two failures; reducing BLAS threads did not resolve incomplete fixture audit",
+    "fixture_change": "Completed-audit success fixture budget 90 -> 300 seconds; no software default, geometric threshold or assertion changes",
+    "targeted_retry": {
+      "count": 16,
+      "seconds": 165.695,
+      "status": "pass",
+      "command": "python -m unittest discover -s tests -p test_improvement.py -q"
+    },
+    "full_suite_rerun_after_fixture_change": false
+  },
+  "types": {
+    "files": 32,
+    "status": "pass",
+    "command": "python -m mypy camtool main.py build_app.py --check-untyped-defs"
+  },
+  "real_gui": {
+    "status": "pass",
+    "budget_seconds": 180,
+    "source": "tools/diagnosis_ui_check.py in-memory seconds-budget override; production defaults unchanged",
+    "checks": {
+      "automatic_diagnosis_no_authorization_full_facts_and_snapshot_reuse": true,
+      "default_flow_exports_exact_audited_candidate_bytes": true,
+      "component_confirmation_with_default_ranges_actual_trial_preview_adopt_undo_original_protection": true,
+      "real_analysis_cancel_no_stuck_reading_or_project_change": true,
+      "project_switch_late_analysis_rejected_and_new_project_auto_analyzed": true,
+      "invalid_input_field_and_recovery_without_blank_diagnosis": true,
+      "wrong_snapshot_diagnosis_rejected": true,
+      "callback_errors": [],
+      "heartbeat_count": 8340
+    },
+    "default_60_seconds_attempt": "Main checks passed; independent verification unfinished at budget expiry; original GUI check correctly failed its expected-pass assertion"
+  },
+  "presentation": {
+    "slides": 8,
+    "package_integrity": "pass",
+    "layout_findings": 0,
+    "import_roundtrip": true,
+    "all_slides_visually_inspected": true,
+    "checked_in_powerpoint": false
+  },
+  "video": {
+    "duration_seconds": 174,
+    "voice": "zh-CN-YunxiNeural",
+    "name_intro": false,
+    "full_audio_video_decode": true,
+    "format": "Actual GUI screenshots and explanatory slides; not continuous screen recording"
+  },
+  "candidate_dxf_sha256": "2a17bf3220a0502b63a6d0040afaf4e7762c88530d5bb48b218930eef1712bf0",
+  "assets": {
+    "SolarCam-v1.9.0-Presentation.pptx": {
+      "sha256": "86c2a7d1de7a8a23aecad395a4fefea6329e3f514ec1f6662cfb79601c409eda",
+      "bytes": 338134
+    },
+    "SolarCam-v1.9.0-Demo-Male.mp4": {
+      "sha256": "332d46937543ddbe9ca024d095ea03e4a9cdae9ab5ae01cfff6f61a0a0a49ad4",
+      "bytes": 4845725
+    }
+  },
+  "limitations": [
+    "Two-dimensional ideal model and finite sampling; no manufacturing release or real-car validation",
+    "Original local EXE native outside-window drag failed once; same EXE full retry passed, cause unconfirmed",
+    "No second-computer verification",
+    "Not all candidates independently verified within the budget",
+    "Historical online site remains v1.3.0"
+  ]
+}

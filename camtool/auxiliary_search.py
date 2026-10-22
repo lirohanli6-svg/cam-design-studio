@@ -15,6 +15,7 @@ from .route_shape import required_nodes
 from .verification import VerificationResult, export_verification
 from .version import VERSION
 from .candidate_audit import audit_candidate
+from .workflow import candidate_explanation, candidate_changes
 
 
 @dataclass
@@ -66,6 +67,8 @@ class SearchOutcome:
     verification_error: str = ""
     dxf: bytes = b""
     status: str = ""
+    stop_reason: str = ""
+    search_elapsed: float = 0.0
 
     def export(self, folder: Path) -> None:
         folder=Path(folder)
@@ -83,6 +86,14 @@ class SearchOutcome:
             audit=copy.deepcopy(self.verification); audit.filename=str(files["dxf"])
             export_verification(audit,folder/"候选DXF独立二次检验")
         data=dict(software_version=VERSION,status=self.status,settings=vars(self.settings),elapsed_seconds=self.elapsed,
+                  search_elapsed_seconds=self.search_elapsed,stop_reason=self.stop_reason,
+                  method="确定性分段轮询与局部数值搜索；无随机过程，无大模型调用",random_seed=None,
+                  changed_parameters=candidate_changes(self.original_project,self.candidate.project),
+                  explanation=candidate_explanation(self.original_project,self.candidate),
+                  original_precision=None if self.original is None else self.original.precision,
+                  original_sampling=None if self.original is None else self.original.sampling,
+                  candidate_sampling=self.candidate.sampling,
+                  remaining_failures=[c.name for c in self.candidate.checks if c.status=="fail"],
                   improved=self.improved,original_metrics=None if self.original is None else self.original.stats,
                   candidate_metrics=self.candidate.stats,precision=self.candidate.precision,
                   auxiliary_points=self.candidate.project.route.auxiliary_points,trials=self.trials,
@@ -166,21 +177,35 @@ def search_auxiliaries(project: Project, settings: SearchSettings,
             operation="切向/张力"
         attempts+=1; stop()
         if progress: progress(f"辅助搜索 {attempts}/{settings.evaluations} · 比赛段 {seg+1}/{count} · {operation}")
-        row: dict[str,Any]=dict(number=attempts,segment=seg+1,operation=operation,accepted=False)
+        trial_started=time.monotonic()
+        row: dict[str,Any]=dict(number=attempts,segment=seg+1,operation=operation,accepted=False,
+            changed_parameters=candidate_changes(original_project,candidate),project=candidate.to_dict(),
+            validation_scope="粗采样筛选，未独立审计；仅最终候选执行精度复算及最终 DXF 审计")
         try:
             result=calculate(candidate,cancelled,precision=False)
-            row.update(metrics=result.stats,rank=rank(result))
+            row.update(metrics=result.stats,rank=rank(result),sampling=result.sampling,
+                       remaining_failures=[c.name for c in result.checks if c.status=="fail"],
+                       metric_changes_from_original=None if original is None else {
+                           key:result.stats[key]-original.stats[key] for key in ("max_pressure","max_steer","checkpoint_error","min_contact_gap")
+                           if key in result.stats and key in original.stats})
             if len(guides)<=settings.maximum_points and (best is None or rank(result)<rank(best)):
                 best=result; row["accepted"]=True
         except ProjectError as exc:
             stop(); row["error"]=str(exc)
+        row["calculation_seconds"]=time.monotonic()-trial_started
         trials.append(row)
     stop()
     if best is None: raise ProjectError("预算内未找到可计算候选。原方案已保留；请核对起跑、必过点与硬件装配。")
+    search_elapsed=time.monotonic()-started
+    stop_reason="候选预算用尽" if attempts>=settings.evaluations else "时间预算用尽（单次计算在取消检查点结束）"
     if progress: progress("候选搜索结束；正在粗细采样复算及最终 DXF 独立接触—转角—轨迹检验（另计时间，可取消）。")
     best=calculate(best.project,cancelled)
+    # Compare equally validated baselines, including precision-induced failures.
+    if original is not None:
+        original=calculate(original_project,cancelled)
     improved=original is not None and rank(best)<rank(original)
     outcome=SearchOutcome(original_project,original,best,copy.deepcopy(settings),trials,time.monotonic()-started,improved)
+    outcome.stop_reason=stop_reason; outcome.search_elapsed=search_elapsed
     if len(best.profile):
         try:
             outcome.verification, outcome.dxf = audit_candidate(best,cancelled)
@@ -191,5 +216,5 @@ def search_auxiliaries(project: Project, settings: SearchSettings,
     feasibility="主设计几何通过" if best.valid else "预算内未找到满足全部主设计约束的方案"
     audit="DXF独立运动学通过" if outcome.verification and outcome.verification.kinematic_pass else "DXF独立检验不通过或未完成"
     stable="主设计采样稳定" if best.precision.get("stable") else "主设计采样稳定性未确认"
-    outcome.status=f"{'有排名改善' if improved else '未确认改善'}；{feasibility}；{stable}；{audit}。候选仅供比较，原方案已保留。"
+    outcome.status=f"{'有排名改善' if improved else '未确认改善'}；{feasibility}；{stable}；{audit}。{stop_reason}，搜索 {search_elapsed:.2f}s / 总耗时 {outcome.elapsed:.2f}s。候选仅供比较，原方案已保留。"
     return outcome

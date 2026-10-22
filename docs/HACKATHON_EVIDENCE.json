@@ -1,0 +1,537 @@
+{
+  "format": "solar-cam-readiness-evidence",
+  "date": "2026-10-22",
+  "software_version": "1.7.0",
+  "scope": "unreleased working-tree improvements; no packaging/publishing",
+  "unit_tests": {
+    "passed": 103,
+    "seconds": 239.55
+  },
+  "final_targeted_tests": {
+    "passed": 10,
+    "seconds": 32.805
+  },
+  "type_checked_files": 29,
+  "gui_suites": [
+    "readiness_ui_check.py",
+    "auxiliary_ui_check.py",
+    "workbench_ui_check.py",
+    "verification_ui_check.py"
+  ],
+  "case_input_factory": "camtool.workbench.demo_project",
+  "normal_input": {
+    "format": "solar-cam-project",
+    "version": 1,
+    "name": "正常演示（理论案例）",
+    "demo_mode": true,
+    "vehicle": {
+      "wheelbase": 120.0,
+      "track": 160.0,
+      "front_diameter": 30.0,
+      "drive_diameter": 130.0,
+      "passive_diameter": 130.0,
+      "sensor_x": 60.0,
+      "sensor_y": 0.0,
+      "drive_side": "right",
+      "speed": 80.0,
+      "max_steer": 40.0
+    },
+    "mechanism": {
+      "kind": "flat",
+      "side": "left",
+      "arm": 25.0,
+      "arm_angle": 0.0,
+      "pivot_x": -25.0,
+      "link": 80.0,
+      "branch": 1,
+      "offset": 0.0,
+      "roller": 2.0,
+      "min_stroke": -15.0,
+      "max_stroke": 15.0,
+      "steer_zero": 0.0
+    },
+    "cam": {
+      "base_radius": 40.0,
+      "neutral_lift": 15.0,
+      "hole_diameter": 6.0,
+      "thickness": 4.0,
+      "ratio": 16.0,
+      "direction": 1,
+      "phase": 0.0,
+      "points": 2000.0,
+      "pressure_limit": 45.0,
+      "reference_layers": true
+    },
+    "route": {
+      "field": [
+        0.0,
+        5000.0,
+        0.0,
+        2000.0
+      ],
+      "waypoints": [
+        [
+          300.0,
+          400.0
+        ],
+        [
+          1100.0,
+          400.0
+        ],
+        [
+          2100.0,
+          850.0
+        ],
+        [
+          3300.0,
+          600.0
+        ],
+        [
+          4400.0,
+          700.0
+        ]
+      ],
+      "obstacles": [],
+      "start_x": 300.0,
+      "start_y": 400.0,
+      "heading": 0.0,
+      "tolerance": 20.0,
+      "tension": 0.75,
+      "step": 1.25,
+      "tangent_offsets": [],
+      "auxiliary_points": [],
+      "steer_rate_limit": 120.0,
+      "start_steer": 0.0
+    },
+    "optimization": {
+      "iterations": 2.0,
+      "smooth_weight": 1.0,
+      "length_weight": 1.0,
+      "pressure_weight": 1.0
+    }
+  },
+  "normal_design_checks": [
+    {
+      "name": "单圈容量",
+      "status": "pass",
+      "detail": "使用 65.3%；至少预留 2% 回程。传动比定义为驱动轮圈数/凸轮圈数。"
+    },
+    {
+      "name": "凸轮采样检查",
+      "status": "pass",
+      "detail": "请求 2000 点，实际 2000 点；名义回算最大偏差 0.083 mm，必过点最大偏差 0.082 mm / 20 mm。有限采样，最终DXF仍须独立检验。"
+    },
+    {
+      "name": "机构可逆传动",
+      "status": "pass",
+      "detail": "本周期平推位移到转角单调可逆。"
+    },
+    {
+      "name": "完整周期转向",
+      "status": "pass",
+      "detail": "运行与回程最大转角 9.38°；机械限位 40°。"
+    },
+    {
+      "name": "完整周期行程",
+      "status": "pass",
+      "detail": "-4.08～2.92 mm（含余段回程）；限值 -15～15。"
+    },
+    {
+      "name": "压力角",
+      "status": "pass",
+      "detail": "最大 41.22° / 限值 45°；增大凸轮、调整机构或放缓转向。"
+    },
+    {
+      "name": "局部过切",
+      "status": "pass",
+      "detail": "理论轮廓最小凸曲率半径 3.955 mm；滚子/球半径 2 mm。"
+    },
+    {
+      "name": "基圆与中心孔",
+      "status": "pass",
+      "detail": "实际最小半径 50.92 mm；设计保底基圆 40 mm；孔径 6 mm。"
+    },
+    {
+      "name": "实车核对",
+      "status": "warn",
+      "detail": "理想平面、纯滚动模型；弹簧、间隙、车壳包络和实车打滑须另行验证。"
+    },
+    {
+      "name": "全局接触干涉",
+      "status": "pass",
+      "detail": "整圈最小间隙 -0.00042 mm，允许离散误差 -0.0200 mm；负值为轮廓侵入滚子/球。有限采样须另做加工/装配复核。"
+    },
+    {
+      "name": "名义转向正向回算",
+      "status": "pass",
+      "detail": "凸轮角采样转向回算与目标路线最大差 0.083 mm；不含接触变形或打滑。"
+    },
+    {
+      "name": "场地边界",
+      "status": "pass",
+      "detail": "传感器与三个轮心均在场地内（未含车壳包络）。"
+    },
+    {
+      "name": "圆形障碍物",
+      "status": "pass",
+      "detail": "传感器/轮心轨迹未进入障碍物（需另核对车壳和轮宽）。"
+    },
+    {
+      "name": "顺序打卡",
+      "status": "pass",
+      "detail": "凸轮名义回算：5/5 个必过点在容差内；最大偏差 0.082 mm；统一容差 20 mm。不要求回算曲线恰好穿过圆心。"
+    },
+    {
+      "name": "前轮转角",
+      "status": "pass",
+      "detail": "最大 9.38° / 限值 40°；超限需增大转弯空间。"
+    },
+    {
+      "name": "转向变化速度",
+      "status": "pass",
+      "detail": "比赛段最大 8.876°/s；规划限值 120°/s（理论恒速）。"
+    },
+    {
+      "name": "主设计采样复算",
+      "status": "pass",
+      "detail": "采样结果稳定；max_pressure: 41.224 → 41.616，差 0.3916 / 稳定阈值 0.5; min_curvature_radius: 3.9553 → 3.9344，差 0.02085 / 稳定阈值 0.1; min_contact_gap: -0.00042307 → -0.00010486，差 0.0003182 / 稳定阈值 0.02。路线步长 1.25→1 mm，实际轮廓点数 2000→4000（触顶未加密时不判稳定）；有限采样不是连续几何证明。"
+    }
+  ],
+  "normal_precision": {
+    "stable": true,
+    "refined": true,
+    "metrics": {
+      "max_pressure": {
+        "coarse": 41.224371021230866,
+        "fine": 41.61595204172989,
+        "difference": 0.3915810204990251,
+        "tolerance": 0.5
+      },
+      "min_curvature_radius": {
+        "coarse": 3.9552812552423093,
+        "fine": 3.9344276379291587,
+        "difference": 0.020853617313150608,
+        "tolerance": 0.1
+      },
+      "min_contact_gap": {
+        "coarse": -0.0004230690417730276,
+        "fine": -0.00010485892137701569,
+        "difference": 0.00031821012039601193,
+        "tolerance": 0.02
+      }
+    },
+    "route_step": [
+      1.25,
+      1.0
+    ],
+    "cam_points": [
+      2000,
+      4000
+    ],
+    "requested_cam_points": [
+      2000.0,
+      4000
+    ],
+    "coarse_status": {
+      "压力角": "pass",
+      "局部过切": "pass",
+      "全局接触干涉": "pass"
+    },
+    "fine_status": {
+      "压力角": "pass",
+      "局部过切": "pass",
+      "全局接触干涉": "pass"
+    }
+  },
+  "normal_dxf": {
+    "sha256": "13ac8d25da452947e56f857e3ff53dbaa9491daf58620a5b2f58065ff0e8f556",
+    "kinematic_pass": true,
+    "checks": [
+      {
+        "name": "DXF 闭合、非法几何及自交",
+        "status": "通过",
+        "detail": "毫米二维闭合简单多边形，2000 条直线段；非相邻线段交叉/相触检查通过。"
+      },
+      {
+        "name": "整圈几何接触",
+        "status": "通过",
+        "detail": "细网格 1442 个位置，无法接触 0 处；搜索范围之外不作接触保证。"
+      },
+      {
+        "name": "整圈多解",
+        "status": "通过",
+        "detail": "在指定机构转角搜索区间内查找全部候选，多解 0 处。"
+      },
+      {
+        "name": "整圈接触干涉",
+        "status": "通过",
+        "detail": "所有保留解均复核球/滚子中心到全部轮廓线段的距离及外部位置。"
+      },
+      {
+        "name": "接触位置连续性",
+        "status": "通过",
+        "detail": "相邻角采样的局部接触点突跳 0 处；阈值至少 10 mm，有限采样不证明连续性。"
+      },
+      {
+        "name": "整圈行程",
+        "status": "通过",
+        "detail": "已求解位置行程 -4.0762～2.9209 mm；限值 -15～15 mm。"
+      },
+      {
+        "name": "整圈转角限位",
+        "status": "通过",
+        "detail": "已求解位置最大转角 9.3822°；限值 ±40°。"
+      },
+      {
+        "name": "整圈死点",
+        "status": "通过",
+        "detail": "检查接触法线方向的机构运动雅可比；阈值为臂长的 0.5%，接近零时不通过。"
+      },
+      {
+        "name": "计划段轨迹",
+        "status": "通过",
+        "detail": "仅从 0° 积分至 235.113°；驱动里程由独立填写的轮径和减速比确定，余段回程未加入比赛路线。"
+      },
+      {
+        "name": "顺序打卡及偏差",
+        "status": "通过",
+        "detail": "按计划段的访问顺序逐点比较；统一容差 20 mm，详见逐点表。"
+      },
+      {
+        "name": "场地边界",
+        "status": "通过",
+        "detail": "检查计划运行段的传感器与三个轮心；未含轮宽和车壳。"
+      },
+      {
+        "name": "圆形障碍物",
+        "status": "通过",
+        "detail": "检查轨迹线段到圆障碍物的距离；仅覆盖传感器与轮心。"
+      },
+      {
+        "name": "原路线偏差",
+        "status": "通过",
+        "detail": "独立轨迹各采样点到输入设计路线折线的最大距离 0.1221 mm；门槛 20 mm。"
+      },
+      {
+        "name": "精度收敛",
+        "status": "通过",
+        "detail": "角步长减半、接触容差收紧至 1/5：轨迹差 0.42541/1 mm，公共角转角差 0.000000/0.1°；仍为有限采样数值稳定性检验。"
+      },
+      {
+        "name": "名义转角比较",
+        "status": "通过",
+        "detail": "计划段最大差 0.00377°，门槛 0.5°；名义数据仅用于此比较，未驱动接触求解或轨迹。"
+      },
+      {
+        "name": "独立实测参数",
+        "status": "未验证",
+        "detail": "数据来源由用户声明、软件未核实；继承设计参数不能排除共同参数错误。当前来源：{\"车辆\": \"设计项目继承，未独立实测\", \"机构\": \"设计项目继承，未独立实测\", \"传动\": \"设计项目继承，未独立实测\", \"装配\": \"按设计尺寸推算，未独立实测\", \"起跑姿态\": \"设计项目继承，须现场核定\", \"运行区间\": \"当前设计计划里程换算，须独立核定；仅定义比赛运行范围\", \"路线\": \"项目中的比赛要求\"}"
+      },
+      {
+        "name": "弹簧压紧力及脱离接触",
+        "status": "未验证",
+        "detail": "需弹簧预紧力、刚度、安装方向、从动件质量、真实转速和接触力模型。"
+      },
+      {
+        "name": "摩擦与驱动力矩",
+        "status": "未验证",
+        "detail": "需摩擦系数、轴承/导向阻力、电机力矩转速曲线、传动效率和负载。"
+      },
+      {
+        "name": "轮胎打滑及实车性能",
+        "status": "未验证",
+        "detail": "需胎面/地面摩擦、载荷分配、质心、实车速度和轨迹试验；本轮未实施实车试验。"
+      },
+      {
+        "name": "车壳轮宽及空间干涉",
+        "status": "未验证",
+        "detail": "需车壳包络、轮宽、装配三维模型和独立空间干涉检查。"
+      },
+      {
+        "name": "连续几何严格证明",
+        "status": "未验证",
+        "detail": "仅对输入折线、求解范围和离散凸轮角作检查；缩小步长稳定不等于连续运动的严格证明。"
+      }
+    ],
+    "metrics": {
+      "ignored_non_outline_entities": [
+        "BASE_CIRCLE:CIRCLE",
+        "CENTER_HOLE:CIRCLE",
+        "ROLLER_PATH:LWPOLYLINE",
+        "ROTATION_REFERENCE:LWPOLYLINE",
+        "ROTATION_REFERENCE:TEXT",
+        "START_REFERENCE:CIRCLE",
+        "START_REFERENCE:LINE",
+        "START_REFERENCE:TEXT",
+        "STEERING_AXIS:LINE"
+      ],
+      "vertex_count": 2000,
+      "full_circle_deg": [
+        0,
+        360
+      ],
+      "run_interval_deg": [
+        0.0,
+        235.1128699051612
+      ],
+      "coarse_step_deg": 0.5,
+      "fine_step_deg": 0.25,
+      "coarse_tolerance_mm": 0.01,
+      "fine_tolerance_mm": 0.002,
+      "solve_angle_interval_deg": [
+        -80.0,
+        80.0
+      ],
+      "issues_cap": 500,
+      "stroke_min_mm": -4.076185522322213,
+      "stroke_max_mm": 2.920863772819146,
+      "max_steer_deg": 9.382200161065356,
+      "reference_path_max_error_mm": 0.12208023869432708,
+      "stability_position_mm": 0.42540671442563643,
+      "stability_steer_deg": 0.0,
+      "nominal_max_difference_deg": 0.003765229119771951,
+      "reference_source": "当前设计曲线，仅用于比较",
+      "nominal_source": "motion.csv（仅比较，数据将写入报告快照）"
+    },
+    "input_sources": {
+      "车辆": "设计项目继承，未独立实测",
+      "机构": "设计项目继承，未独立实测",
+      "传动": "设计项目继承，未独立实测",
+      "装配": "按设计尺寸推算，未独立实测",
+      "起跑姿态": "设计项目继承，须现场核定",
+      "运行区间": "当前设计计划里程换算，须独立核定；仅定义比赛运行范围",
+      "路线": "项目中的比赛要求"
+    }
+  },
+  "problem_input": {
+    "format": "solar-cam-project",
+    "version": 1,
+    "name": "问题演示（理论案例）",
+    "demo_mode": true,
+    "vehicle": {
+      "wheelbase": 120.0,
+      "track": 160.0,
+      "front_diameter": 30.0,
+      "drive_diameter": 130.0,
+      "passive_diameter": 130.0,
+      "sensor_x": 60.0,
+      "sensor_y": 0.0,
+      "drive_side": "right",
+      "speed": 80.0,
+      "max_steer": 5.0
+    },
+    "mechanism": {
+      "kind": "flat",
+      "side": "left",
+      "arm": 25.0,
+      "arm_angle": 0.0,
+      "pivot_x": -25.0,
+      "link": 80.0,
+      "branch": 1,
+      "offset": 0.0,
+      "roller": 2.0,
+      "min_stroke": -15.0,
+      "max_stroke": 15.0,
+      "steer_zero": 0.0
+    },
+    "cam": {
+      "base_radius": 40.0,
+      "neutral_lift": 15.0,
+      "hole_diameter": 6.0,
+      "thickness": 4.0,
+      "ratio": 16.0,
+      "direction": 1,
+      "phase": 0.0,
+      "points": 2000.0,
+      "pressure_limit": 15.0,
+      "reference_layers": true
+    },
+    "route": {
+      "field": [
+        0.0,
+        5000.0,
+        0.0,
+        2000.0
+      ],
+      "waypoints": [
+        [
+          300.0,
+          400.0
+        ],
+        [
+          1100.0,
+          400.0
+        ],
+        [
+          2100.0,
+          850.0
+        ],
+        [
+          3300.0,
+          600.0
+        ],
+        [
+          4400.0,
+          700.0
+        ]
+      ],
+      "obstacles": [
+        [
+          2100.0,
+          850.0,
+          60.0
+        ]
+      ],
+      "start_x": 300.0,
+      "start_y": 400.0,
+      "heading": 0.0,
+      "tolerance": 20.0,
+      "tension": 0.75,
+      "step": 1.25,
+      "tangent_offsets": [],
+      "auxiliary_points": [],
+      "steer_rate_limit": 120.0,
+      "start_steer": 0.0
+    },
+    "optimization": {
+      "iterations": 2.0,
+      "smooth_weight": 1.0,
+      "length_weight": 1.0,
+      "pressure_weight": 1.0
+    }
+  },
+  "problem_failures": [
+    "完整周期转向",
+    "压力角",
+    "圆形障碍物",
+    "前轮转角"
+  ],
+  "workflow_checks": {
+    "normal_start_has_no_demo_or_acceptance_task": true,
+    "queued_calculation_and_verification_results_rejected_after_cancel": true,
+    "export_responsive_cancellable_and_duplicate_click_guarded": true,
+    "adjust_recompute_retains_actual_failures_and_constraints": true,
+    "modified_inputs_invalidate_and_original_project_restores_unchanged": true,
+    "callback_errors": [],
+    "heartbeat_count": 1305,
+    "software_version": "1.7.0"
+  },
+  "source_sha256": {
+    "camtool/workflow.py": "f74a553e3cc046b31773ee58798df50d376b86065ec682241747cc55ac642db4",
+    "camtool/ui.py": "a936218325c0228a7de6565126ae5f4a0801d031c7d769f41b7ffdf0014e7d83",
+    "camtool/workbench.py": "9483a24090d024a4d35182c15c2a6b62d965cbac00022a71d4154b416c062a4a",
+    "camtool/workbench_ui.py": "dd6bb03de556f211d744d4efdb6df55d93415701255b2d0044c49d268a4bd932",
+    "camtool/auxiliary_search.py": "6cdf29fa32d1c42a042aaecb49ff6a4f72c1ea867091b17e3c45cfb5eaf1ae1b",
+    "camtool/auxiliary_ui.py": "a23c15dcf731fbed7be389e9fa0f6ef20149d59424fe83825103c8b347073ee5",
+    "camtool/export.py": "5559036f97c1082cb0652de3eb843e633ae23fd390b71dee7db73f9aeab12c35",
+    "camtool/verification.py": "c3c1ab1f4ee55b5319be6d84c84149c67c414d26316d3134e9b57882cfd4c93f",
+    "camtool/verification_ui.py": "1a3576acde7bc4d1659db3df14c230d2a4074d9b266608ad88010893f41ad9a4",
+    "camtool/plotting.py": "3ccfa84d7885c46d0a991ff8c14e97c23a20ed1f8d2b5a8d26b6a3053fa47b7f"
+  },
+  "limits": [
+    "theoretical 2D model, not physical accuracy or manufacturing approval",
+    "shared model assumptions can be wrong",
+    "finite sampling is not a continuous proof",
+    "DXF hash belongs only to the recorded exported bytes; reruns generate new file metadata"
+  ]
+}
