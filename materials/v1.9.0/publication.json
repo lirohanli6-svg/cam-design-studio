@@ -1,0 +1,43 @@
+{
+  "version": "1.9.0",
+  "date": "2026-10-22",
+  "repository": "https://github.com/lirohanli6-svg/cam-design-studio",
+  "source_snapshot_commit": "a6fb8ac4644f0f5e19cd1816b683131fc2d93af8",
+  "source_paths_verified": 109,
+  "release_url": "https://github.com/lirohanli6-svg/cam-design-studio/releases/tag/v1.9.0",
+  "release_id": 420896969,
+  "tag": "v1.9.0",
+  "draft": false,
+  "asset_downloads_verified": true,
+  "assets": [
+    {
+      "name": "SolarCam-v1.9.0-Demo-Male.mp4",
+      "bytes": 4845725,
+      "sha256": "332d46937543ddbe9ca024d095ea03e4a9cdae9ab5ae01cfff6f61a0a0a49ad4",
+      "url": "https://github.com/lirohanli6-svg/cam-design-studio/releases/download/v1.9.0/SolarCam-v1.9.0-Demo-Male.mp4",
+      "http_status": 200,
+      "download_matches_verified_local_bytes": true
+    },
+    {
+      "name": "SolarCam-v1.9.0-Presentation.pptx",
+      "bytes": 338134,
+      "sha256": "86c2a7d1de7a8a23aecad395a4fefea6329e3f514ec1f6662cfb79601c409eda",
+      "url": "https://github.com/lirohanli6-svg/cam-design-studio/releases/download/v1.9.0/SolarCam-v1.9.0-Presentation.pptx",
+      "http_status": 200,
+      "download_matches_verified_local_bytes": true
+    }
+  ],
+  "retained": [
+    "Previous remote commits",
+    "web-demo/ and historical 作品简介.md",
+    "v1.3.0 release assets",
+    "Local dirty/untracked implementations and old deliveries"
+  ],
+  "not_in_scope": [
+    "No Windows EXE/ZIP uploaded",
+    "No website update",
+    "No local git commit or index staging"
+  ],
+  "validation": "validation.json",
+  "note": "This file and the final handoff update follow the source snapshot commit; the v1.9.0 tag points to that verified source snapshot."
+}
