@@ -4,7 +4,7 @@
 
 - [下载8页PPT](https://github.com/lirohanli6-svg/cam-design-studio/releases/download/v1.9.0/SolarCam-v1.9.0-Presentation.pptx)
 - [下载男声讲解视频](https://github.com/lirohanli6-svg/cam-design-studio/releases/download/v1.9.0/SolarCam-v1.9.0-Demo-Male.mp4)
-- [旁白稿](narration.md)：普通话合成男声云希，不介绍作者姓名。
+- [旁白稿](narration.md)：普通话合成男声云希。
 - [本轮真实GUI与案例记录](case-evidence.json)、[实际修改方案](case-plan.md)、[受检候选DXF](candidate-cam.dxf)。该轮廓仅供理论复核，不能据此加工放行。
 - [验证摘要与附件SHA256](validation.json)
 
